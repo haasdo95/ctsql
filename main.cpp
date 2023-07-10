@@ -8,16 +8,6 @@
 #include <array>
 #include <string_view>
 
-//template<std::size_t StrLen>
-//consteval std::size_t count_commas(refl::const_string<StrLen> s) {
-//    std::size_t count = 0;
-//    for (std::size_t i=0; i<s.size; ++i) {
-//        if (s.data[i] == ',') {
-//            ++count;
-//        }
-//    }
-//    return count;
-//}
 //
 //consteval std::string_view trim(std::string_view s) {
 //    const char* ws = " \t\n\r\f\v";
@@ -54,31 +44,40 @@
 //}
 
 
+
+
 int main() {
-    constexpr char c_names[] = "name, height";
-    Parser parser;
-    constexpr auto res = Parser::p.parse(ctpg::buffers::cstring_buffer(c_names));
-//    static_assert(res->len == 3);
+    static constexpr char query[] = " select ST.name, School.location from Student as ST, School";
+    static constexpr auto cs = refl::make_const_string(query);
 
+    static constexpr auto c_res = Query<cs>::select_res;
+    static_assert(c_res.size() == 2);
+    static constexpr auto t_res = Query<cs>::from_res;
+    static_assert(t_res.size() == 2);
 
-//    static_assert(count_commas(refl::make_const_string("hello, world lol")) == 1);
-//    constexpr auto s = refl::make_const_string("    hello,  world,lol  , ");
-//    constexpr auto arr = split<s>();
-//    static_assert(split<s>().size() == 4);
-//    static_assert(split<s>()[0] == "hello");
-//    static_assert(split<s>()[1] == "world");
-//    static_assert(split<s>()[2] == "lol");
-//    static_assert(split<s>()[3].empty());
-//
-//    std::cout << split<s>()[0] << std::endl;
-//    std::cout << split<s>()[1] << std::endl;
-//    std::cout << split<s>()[2] << std::endl;
-//    std::cout << split<s>()[3] << std::endl;
-//
-//    constexpr auto cnt = map(arr, [](auto s){return s.size();});
-//    static_assert(cnt[0] == 5);
-//    static_assert(cnt[1] == 5);
-//    static_assert(cnt[2] == 3);
-//    static_assert(cnt[3] == 0);
+    for (const auto& e: c_res) {
+        std::cout << e.column_name << " ";
+    }
+    std::cout << std::endl;
+    for (const auto& e: t_res) {
+        std::cout << e.name << " ";
+    }
 
+//    static_assert(res.size() == 3);
+//    static constexpr char c_names[] = "name, height, Student.age, nickname as alias";
+//    static constexpr char c_names[] = "   COUNT(  * )   ";
+//    static constexpr char c_names[] = "COUNT(School.name) AS n_a_m_e, \"height\" As Height as hEight, Student.age";
+
+//    auto buf = ctpg::buffers::string_buffer(c_names);
+//    auto res = SelectParser<3>::p.parse(buf, std::cerr).value();
+
+//    static constexpr auto cbuf = ctpg::buffers::cstring_buffer(ss.data);
+//    constexpr auto res = SelectParser<2>::p.parse(cbuf).value();
+
+//    for (const auto& e: res) {
+//        std::cout << e.table_name << '.' << e.column_name << " AS " << e.alias << " with agg: " << static_cast<int>(e.agg) << std::endl;
+//    }
+//    static_assert(res.len == 3);
+
+//    static_assert(res->arr.size() == 2);
 }

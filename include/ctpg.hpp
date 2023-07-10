@@ -2166,6 +2166,7 @@ namespace ctpg
 
             struct state
             {
+                constexpr state(): all_situations_vec{}, kernel{}, situations_by_symbol{} {}
                 situation_vector all_situations_vec = {};
                 situation_set kernel = {};
                 situation_vector situations_by_symbol[symbol_count] = {};
