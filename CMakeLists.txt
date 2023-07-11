@@ -3,7 +3,7 @@ project(sql)
 
 set(CMAKE_CXX_STANDARD 20)
 
-add_executable(sql main.cpp include/ctpg.hpp include/utils.h)
+add_executable(sql main.cpp include/ctpg.hpp include/logical.h include/keywords.h include/identifiers.h include/common.h include/numeral.h)
 target_sources(sql PUBLIC include)
 target_include_directories(sql PRIVATE include)
 
