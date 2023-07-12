@@ -11,50 +11,25 @@
 #include "identifiers.h"
 #include "numeral.h"
 
-
 namespace ctsql {
-//    template<std::size_t MaxNCols, std::size_t MaxNTables>
+    static constexpr ctpg::nterm<Query> query{"query"};
+    static constexpr auto query_rules = ctpg::rules(
+        query(impl::select_kw, impl::col_name_list, impl::from_kw, impl::tab_name_list, impl::where_kw, impl::boolean_and_terms) >=
+            [](std::string_view, ColumnNames cns, std::string_view, TableNames tns, std::string_view, BooleanAndTerms bat) {
+                return Query(cns, tns, BooleanOrTerms{bat, 1});
+            }
+    );
+
     class SelectParser {
     public:
         static constexpr ctpg::parser p{
-            impl::col_name_list,
-            std::tuple_cat(impl_exp::kw_terms, impl_exp::ident_terms, impl_exp::numeral_terms),
-            std::tuple_cat(impl_exp::kw_nterms, impl_exp::ident_nterms, impl_exp::numeral_nterms),
-            std::tuple_cat(impl_exp::kw_rules, impl_exp::ident_rules, impl_exp::numeral_rules)
+            query,
+            std::tuple_cat(impl_exp::kw_terms, impl_exp::ident_terms, impl_exp::numeral_terms, impl_exp::logical_terms),
+            std::tuple_cat(impl_exp::kw_nterms, impl_exp::ident_nterms, impl_exp::numeral_nterms, impl_exp::logical_nterms, ctpg::nterms(query)),
+            std::tuple_cat(impl_exp::kw_rules, impl_exp::ident_rules, impl_exp::numeral_rules, impl_exp::logical_rules, query_rules)
         };
     };
 
 }
-
-
-//template<refl::const_string query>
-//class Query {
-//private:
-//    static constexpr std::size_t npos = decltype(query)::npos;
-//    static constexpr auto select_kw = refl::make_const_string("SELECT");
-//    static constexpr std::size_t select_pos = find_substr_case_insensitive(query, select_kw);
-//    static_assert(select_pos != npos);
-//    static constexpr std::size_t select_kw_end = select_pos + select_kw.size;
-//    static constexpr auto from_kw = refl::make_const_string("FROM");
-//    static constexpr std::size_t from_pos = find_substr_case_insensitive(query, from_kw);
-//    static_assert(from_pos != npos);
-//    static constexpr std::size_t from_kw_end = from_pos + from_kw.size;
-//
-//    static constexpr auto column_names = query.template substr<select_kw_end, from_pos-select_kw_end>();
-//    static constexpr auto c_buf = ctpg::buffers::cstring_buffer(column_names.data);
-//    static constexpr std::size_t num_column_names = count_commas(column_names) + 1;
-//    static constexpr auto select_p = SelectParser<num_column_names>::p;
-//
-//    static constexpr auto table_names = query.template substr<from_kw_end>();
-//    static constexpr auto t_buf = ctpg::buffers::cstring_buffer(table_names.data);
-//    static constexpr std::size_t num_table_names = count_commas(table_names) + 1;
-//    static constexpr auto from_p = FromParser<num_table_names>::p;
-//
-//public:
-//    static constexpr auto select_res = select_p.parse(c_buf).value();
-//    static constexpr auto from_res = from_p.parse(t_buf).value();
-//
-//
-//};
 
 #endif //SQL_PARSER_H

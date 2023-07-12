@@ -37,19 +37,30 @@ int main() {
 //        std::cout << e.name << " ";
 //    }
 
-    static constexpr char c_names[] = R"(SUM('name') "123", "height" AS HEIGHT, 'Student.age' s_age)";
-//    static constexpr char c_names[] = "\"4-5abc bf\"";
-//    static constexpr char c_names[] = "COUNT(School.name) AS n_a_m_e, \"height\" As Height as hEight, Student.age";
+    using namespace ctsql;
+
+    static constexpr char s[] = "height=173";
+    static constexpr ctpg::parser p{
+        impl::boolean_factor,
+        std::tuple_cat(impl_exp::kw_terms, impl_exp::ident_terms, impl_exp::numeral_terms, impl_exp::logical_terms),
+        std::tuple_cat(impl_exp::kw_nterms, impl_exp::ident_nterms, impl_exp::numeral_nterms, impl_exp::logical_nterms, ctpg::nterms(query)),
+        std::tuple_cat(impl_exp::kw_rules, impl_exp::ident_rules, impl_exp::numeral_rules, impl_exp::logical_rules)
+    };
+
+//    static constexpr char c_names[] = R"(select "S-2".name "123", height AS HEIGHT, 'Student.age' s_age FROM "Student" as "S-1", School 'S-2' where height=173)";
 
 //    auto buf = ctpg::buffers::string_buffer(c_names);
 //    auto res = SelectParser<3>::p.parse(buf, std::cerr).value();
 
-    static constexpr auto cbuf = ctpg::buffers::cstring_buffer(c_names);
-    constexpr auto res = ctsql::SelectParser::p.parse(cbuf).value();
+//    static constexpr auto cbuf = ctpg::buffers::cstring_buffer(c_names);
+//    constexpr auto res = ctsql::SelectParser::p.parse(cbuf).value();
+//    static_assert(res.cns[1].column_name == "height");
+//    ctsql::print(std::cout, res.cns, ", ") << std::endl;
+//    ctsql::print(std::cout, res.tns, ", ") << std::endl;
 
-    for (const auto& e: res) {
-        std::cout << e.table_name << '.' << e.column_name << " AS " << e.alias << " with agg: " << static_cast<int>(e.agg) << std::endl;
-    }
+//    for (const auto& e: res) {
+//        std::cout << e.table_name << '.' << e.column_name << " AS " << e.alias << " with agg: " << static_cast<int>(e.agg) << std::endl;
+//    }
 //    static_assert(res.len == 3);
 //
 //    static_assert(res->arr.size() == 2);
