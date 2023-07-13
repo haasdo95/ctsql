@@ -48,18 +48,12 @@ namespace impl {
             floating_point('-', floating_point) >= [](char, double v) { return -v; },
             floating_point('+', floating_point) >= [](char, double v) { return v; }
     );
-
-    static constexpr ctpg::nterm<std::variant<int64_t, double>> numeral{"numeral"};
-    static constexpr auto int_or_double_rules = ctpg::rules(
-            numeral(floating_point) >= [](double v) { return std::variant<int64_t, double>(v); },
-            numeral(integer) >= [](int64_t v) { return std::variant<int64_t, double>(v); }
-    );
 }
 
 namespace impl_exp {
     static constexpr auto numeral_terms = ctpg::terms('-', '+', impl::non_neg_floating_point, impl::non_neg_decimal_integer, impl::zeros);
-    static constexpr auto numeral_nterms = ctpg::nterms(impl::floating_point, impl::integer_without_dec_pt, impl::integer, impl::numeral);
-    static constexpr auto numeral_rules = std::tuple_cat(impl::floating_point_rules, impl::integer_rules, impl::int_or_double_rules);
+    static constexpr auto numeral_nterms = ctpg::nterms(impl::floating_point, impl::integer_without_dec_pt, impl::integer);
+    static constexpr auto numeral_rules = std::tuple_cat(impl::floating_point_rules, impl::integer_rules);
 }
 
 }

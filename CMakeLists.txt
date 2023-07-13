@@ -7,6 +7,15 @@ add_executable(sql main.cpp include/ctpg.hpp include/logical.h include/keywords.
 target_sources(sql PUBLIC include)
 target_include_directories(sql PRIVATE include)
 
+# increase constexpr step limits
+if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    target_compile_options(sql PRIVATE -fconstexpr-steps=114514114514)
+elseif (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    target_compile_options(sql PRIVATE -fconstexpr-ops-limit=114514114514)
+else()
+    message("Unsupported Compiler")
+endif ()
+
 find_package(fmt)
 target_link_libraries(sql PRIVATE fmt::fmt)
 

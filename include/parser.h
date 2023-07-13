@@ -14,9 +14,9 @@
 namespace ctsql {
     static constexpr ctpg::nterm<Query> query{"query"};
     static constexpr auto query_rules = ctpg::rules(
-        query(impl::select_kw, impl::col_name_list, impl::from_kw, impl::tab_name_list, impl::where_kw, impl::boolean_and_terms) >=
-            [](std::string_view, ColumnNames cns, std::string_view, TableNames tns, std::string_view, BooleanAndTerms bat) {
-                return Query(cns, tns, BooleanOrTerms{bat, 1});
+        query(impl::select_kw, impl::col_name_list, impl::from_kw, impl::tab_name_list, impl::where_kw, impl::boolean_or_terms) >=
+            [](std::string_view, ColumnNames cns, std::string_view, TableNames tns, std::string_view, BooleanOrTerms bot) {
+                return Query(cns, tns, bot);
             }
     );
 
