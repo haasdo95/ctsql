@@ -3,9 +3,9 @@ project(sql)
 
 set(CMAKE_CXX_STANDARD 20)
 
-add_executable(sql main.cpp include/ctpg.hpp include/logical.h include/keywords.h include/identifiers.h include/common.h include/numeral.h)
-target_sources(sql PUBLIC include)
-target_include_directories(sql PRIVATE include)
+add_executable(sql main.cpp include/logical.h include/keywords.h include/identifiers.h include/common.h include/numeral.h)
+target_sources(sql PUBLIC include dep)
+target_include_directories(sql PRIVATE include dep)
 
 # increase constexpr step limits
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")

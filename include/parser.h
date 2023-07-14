@@ -17,12 +17,16 @@ namespace ctsql {
         query(impl::select_kw, impl::col_name_list, impl::from_kw, impl::tab_name_list, impl::where_kw, impl::boolean_or_terms) >=
             [](std::string_view, ColumnNames cns, std::string_view, TableNames tns, std::string_view, BooleanOrTerms bot) {
                 return Query(cns, tns, bot);
+            },
+        query(impl::select_kw, impl::col_name_list, impl::from_kw, impl::tab_name_list) >=
+            [](std::string_view, ColumnNames cns, std::string_view, TableNames tns) {
+                return Query(cns, tns, BooleanOrTerms{});
             }
     );
 
     class SelectParser {
     public:
-        static constexpr ctpg::parser p{
+        static constexpr ctpg::parser p {
             query,
             std::tuple_cat(impl_exp::kw_terms, impl_exp::ident_terms, impl_exp::numeral_terms, impl_exp::logical_terms),
             std::tuple_cat(impl_exp::kw_nterms, impl_exp::ident_nterms, impl_exp::numeral_nterms, impl_exp::logical_nterms, ctpg::nterms(query)),
