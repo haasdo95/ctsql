@@ -8,8 +8,8 @@ namespace ctsql {
     static constexpr std::size_t MaxNCols = 32;
     static constexpr std::size_t MaxNTables = 32;
 
-    static constexpr std::size_t MaxAndTerms = 4;
-    static constexpr std::size_t MaxOrTerms = 4;
+    static constexpr std::size_t MaxAndTerms = 8;
+    static constexpr std::size_t MaxOrTerms = 8;
 
     enum class AggOp {
         NONE = 0,
