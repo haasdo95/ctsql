@@ -6,13 +6,12 @@
 #include <array>
 #include <string_view>
 
-#include "parser/identifiers.h"
-#include "parser/numeral.h"
-#include "parser/keywords.h"
-#include "parser/logical.h"
-#include "parser/parser.h"
-
-#include "parser/preproc.h"
+//#include "parser/identifiers.h"
+//#include "parser/numeral.h"
+//#include "parser/keywords.h"
+//#include "parser/logical.h"
+//#include "parser/parser.h"
+//#include "parser/preproc.h"
 
 #include <__generator.hpp>
 
@@ -25,6 +24,8 @@ struct Point {
     int y{};
     [[nodiscard]] double get_mag() const { return std::sqrt(static_cast<double>(x * x + y * y)); }
     std::string name;
+    auto operator<=>(const Point& other) const = default;
+//    bool operator==(const Point& other) const = default;
 };
 
 struct Vec {
@@ -66,64 +67,60 @@ REFL_AUTO(
 
 //static_assert(std::is_same_v<tuple_type<Point>, int>);
 
-
+using namespace ctsql;
 
 int main() {
-    Point pt{1, 1, "pt1"};
+    Point pt{1, 2, "lol"};
+    constexpr auto v = impl::get_index<Point>("name");
+    static_assert(v == 3);
 
-    constexpr auto td = resolve_name<Point>(std::string_view("name")).value();
-    static_assert(td.name == "Point");
+    BooleanFactor bf{CompOp::EQ, BasicColumnName{"", "x"}, BasicColumnName{"", "y"}};
 
-    constexpr auto tdpv = resolve_name<Point, Vec>(std::string_view("x1"));
-    static_assert(std::holds_alternative<refl::type_descriptor<Vec>>(tdpv));
+//    static constexpr char query_s[] = R"(select x from Point)";
+//    static constexpr auto cbuf = ctpg::buffers::cstring_buffer(query_s);
+//    static constexpr auto res = ctsql::SelectParser::p.parse(cbuf).value();
+//    for (constexpr auto cn: res.cns) {
+//
+//    }
 
-//    refl::util::for_each(refl::reflect<Point>().members, [&](auto member){
-//        std::cout << refl::descriptor::get_display_name(member) << ' ' << member.name << " value: ";
-////        constexpr auto sv = to_string_view(member.name);
-//        if constexpr (member.name.str_view() == std::string_view ("get_mag")) {
-//            std::cout << "HA" << std::endl;
-//        }
-//        if constexpr (std::string_view ("get_mag") == member.name) {
-//            std::cout << "LOL" << std::endl;
-//        }
-//        std::cout << member(pt);
-//        std::cout << std::endl;
-//    });
+//    auto selector = impl::make_selector<Point>(bf);
 
-    static constexpr char query_s[] = R"(SELECT V.name, pt.name, P.x as X, y1 as Y, SUM(y) FROM pt P, v as V
-                                         ON x=x1 AND y=V.y1 WHERE x1 > 3 OR pt.y >= P.x)";
+//    static constexpr auto eq = to_operator<Point, Point>(CompOp::EQ);
+//    static_assert(eq(Point{1, 1, "lol"}, Point{1, 1, "lol"}));
+//    static constexpr auto neq = to_operator<CompOp::NEQ>();
+//    static_assert(neq(Point{1, 1, "lol"}, Point{1, 2, "lol"}));
 
-//    auto buf = ctpg::buffers::string_buffer(query_s);
-//    auto res = ctsql::SelectParser::p.parse(buf, std::cerr).value();
-
-    static constexpr auto cbuf = ctpg::buffers::cstring_buffer(query_s);
-    static constexpr auto res = ctsql::SelectParser::p.parse(cbuf).value();
-    ctsql::print(std::cout, res.cns, ", ") << std::endl;
-    std::cout << res.tns << std::endl;
-    ctsql::print(std::cout, res.join_condition, " AND ") << std::endl;
-    for (const auto& bat: res.where_condition) {
-        ctsql::print(std::cout, bat, " AND ") << std::endl;
-    }
-
-    std::cout << std::endl;
-
-    static constexpr auto pp_res = ctsql::impl::dealias_query(res);
-    ctsql::print(std::cout, pp_res.cns, ", ") << std::endl;
-    std::cout << pp_res.tns << std::endl;
-    ctsql::print(std::cout, pp_res.join_condition, " AND ") << std::endl;
-    for (const auto& bat: pp_res.where_condition) {
-        ctsql::print(std::cout, bat, " AND ") << std::endl;
-    }
-
-    std::cout << std::endl;
-
-    static constexpr auto resolv_res = ctsql::impl::resolve_table_name<Point, Vec>(pp_res);
-    ctsql::print(std::cout, resolv_res.cns, ", ") << std::endl;
-    std::cout << resolv_res.tns << std::endl;
-    ctsql::print(std::cout, resolv_res.join_condition, " AND ") << std::endl;
-    for (const auto& bat: resolv_res.where_condition) {
-        ctsql::print(std::cout, bat, " AND ") << std::endl;
-    }
+//    static constexpr char query_s[] = R"(SELECT V.name, pt.name, P.x as X, y1 as Y, SUM(y) FROM pt P, v as V
+//                                         ON x=x1 AND y=V.y1 WHERE x1 > 3 OR pt.y >= P.x)";
+//
+//    static constexpr auto cbuf = ctpg::buffers::cstring_buffer(query_s);
+//    static constexpr auto res = ctsql::SelectParser::p.parse(cbuf).value();
+//    ctsql::print(std::cout, res.cns, ", ") << std::endl;
+//    std::cout << res.tns << std::endl;
+//    ctsql::print(std::cout, res.join_condition, " AND ") << std::endl;
+//    for (const auto& bat: res.where_condition) {
+//        ctsql::print(std::cout, bat, " AND ") << std::endl;
+//    }
+//
+//    std::cout << std::endl;
+//
+//    static constexpr auto pp_res = ctsql::impl::dealias_query(res);
+//    ctsql::print(std::cout, pp_res.cns, ", ") << std::endl;
+//    std::cout << pp_res.tns << std::endl;
+//    ctsql::print(std::cout, pp_res.join_condition, " AND ") << std::endl;
+//    for (const auto& bat: pp_res.where_condition) {
+//        ctsql::print(std::cout, bat, " AND ") << std::endl;
+//    }
+//
+//    std::cout << std::endl;
+//
+//    static constexpr auto resolv_res = ctsql::impl::resolve_table_name<Point, Vec>(pp_res);
+//    ctsql::print(std::cout, resolv_res.cns, ", ") << std::endl;
+//    std::cout << resolv_res.tns << std::endl;
+//    ctsql::print(std::cout, resolv_res.join_condition, " AND ") << std::endl;
+//    for (const auto& bat: resolv_res.where_condition) {
+//        ctsql::print(std::cout, bat, " AND ") << std::endl;
+//    }
 
 //
 //    std::cout << refl::reflect<Point>().name << std::endl;

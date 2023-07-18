@@ -41,6 +41,28 @@ namespace ctsql {
     enum class CompOp {
         EQ = 0, GT, LT, GEQ, LEQ, NEQ
     };
+
+    template<typename L, typename R> requires std::three_way_comparable_with<L, R>
+    using cop_fptr = bool (*)(const L&, const R&);
+
+    template<typename L, typename R>
+    constexpr cop_fptr<L, R> to_operator(CompOp cop) {
+        switch (cop) {
+            case CompOp::EQ:
+                return [](const L& a, const R& b){ return a == b; };
+            case CompOp::GT:
+                return [](const L& a, const R& b){ return a > b; };
+            case CompOp::LT:
+                return [](const L& a, const R& b){ return a < b; };
+            case CompOp::GEQ:
+                return [](const L& a, const R& b){ return a >= b; };
+            case CompOp::LEQ:
+                return [](const L& a, const R& b){ return a <= b; };
+            case CompOp::NEQ:
+                return [](const L& a, const R& b){ return a != b; };
+        }
+        throw std::runtime_error("unknown comp op");
+    }
     constexpr CompOp invert(CompOp cop) {
         switch (cop) {
             case CompOp::EQ:
