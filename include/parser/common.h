@@ -2,11 +2,11 @@
 #define SQL_COMMON_H
 
 #include <iosfwd>
+#include <utility>
 #include "ctpg.hpp"
 
 namespace ctsql {
     static constexpr std::size_t MaxNCols = 32;
-    static constexpr std::size_t MaxNTables = 32;
 
     static constexpr std::size_t MaxAndTerms = 8;
     static constexpr std::size_t MaxOrTerms = 8;
@@ -38,11 +38,6 @@ namespace ctsql {
     }
 
 
-    enum class LogicOp {
-        AND, OR
-    };
-
-
     enum class CompOp {
         EQ = 0, GT, LT, GEQ, LEQ, NEQ
     };
@@ -61,6 +56,7 @@ namespace ctsql {
             case CompOp::NEQ:
                 return CompOp::NEQ;
         }
+        throw std::runtime_error("unknown comp op");
     }
     constexpr CompOp negate(CompOp cop) {
         switch (cop) {
@@ -77,6 +73,7 @@ namespace ctsql {
             case CompOp::NEQ:
                 return CompOp::EQ;
         }
+        throw std::runtime_error("unknown comp op");
     }
     constexpr std::string_view to_str(CompOp cop) {
         switch (cop) {
@@ -161,7 +158,24 @@ namespace ctsql {
             return os;
         }
     };
-    using TableNames = ctpg::stdex::cvector<TableName, MaxNTables>;
+    // simplifying assumption: joining at most 2 tables
+    struct TableNames {
+        constexpr TableNames() = default;
+        constexpr explicit TableNames(TableName first): first{first}, second{std::nullopt} {}
+        constexpr TableNames(TableName first, TableName second): first{first}, second{second} {}
+        constexpr TableNames(const TableNames&) = default;
+        TableName first;
+        std::optional<TableName> second;
+    };
+//    using TableNames = std::pair<TableName, std::optional<TableName>>;
+
+    std::ostream& operator<<(std::ostream& os, const TableNames& tns) {
+        os << tns.first << ", ";
+        if (tns.second) {
+            os << tns.second.value();
+        }
+        return os;
+    }
 
     template<typename T, std::size_t N>
     std::ostream& print(std::ostream& os, ctpg::stdex::cvector<T, N> vec, const std::string& sep) {
@@ -203,9 +217,11 @@ namespace ctsql {
     struct Query {
         ColumnNames cns;
         TableNames tns;
-        BooleanOrTerms bot;
+        BooleanAndTerms join_condition;
+        BooleanOrTerms where_condition;
         constexpr Query() = default;
-        constexpr Query(ColumnNames cns, TableNames tns, BooleanOrTerms bot): cns{cns}, tns{tns}, bot{bot} {}
+        constexpr Query(ColumnNames cns, TableNames tns, BooleanAndTerms join_condition, BooleanOrTerms where_condition):
+            cns{cns}, tns{tns}, join_condition{join_condition}, where_condition{where_condition} {}
     };
 
 }

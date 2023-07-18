@@ -17,6 +17,9 @@ namespace impl {
     static constexpr char where_pattern[] = "[wW][hH][eE][rR][eE]";
     static constexpr ctpg::regex_term<where_pattern> where_kw("where_kw");
 
+    static constexpr char on_pattern[] = "[oO][nN]";
+    static constexpr ctpg::regex_term<on_pattern> on_kw("on_kw");
+
     static constexpr char count_pattern[] = "[cC][oO][uU][nN][tT]";
     static constexpr ctpg::regex_term<count_pattern> count_kw("count_kw");
 
@@ -53,7 +56,7 @@ namespace impl {
 }
 
 namespace impl_exp {
-    static constexpr auto kw_terms = ctpg::terms(impl::select_kw, impl::as_kw, impl::from_kw, impl::where_kw,
+    static constexpr auto kw_terms = ctpg::terms(impl::select_kw, impl::as_kw, impl::from_kw, impl::where_kw, impl::on_kw,
                                                  impl::count_kw, impl::sum_kw, impl::max_kw, impl::min_kw, impl::avg_kw,
                                                  impl::not_kw, impl::and_kw, impl::or_kw);
     static constexpr auto kw_nterms = ctpg::nterms(impl::agg_kws);

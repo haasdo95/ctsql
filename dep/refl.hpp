@@ -162,6 +162,11 @@ namespace refl
                 return data;
             }
 
+            constexpr std::string_view str_view() const noexcept
+            {
+                return std::string_view(data, N);
+            }
+
             /**
              * Returns the contained string as an std::string.
              */
@@ -334,6 +339,25 @@ namespace refl
             else {
                 for (size_t i = 0; i < M; i++) {
                     if (a.data[i] != b.data[i]) {
+                        return false;
+                    }
+                }
+                return true;
+            }
+        }
+
+        /**
+         * Compares a const_string to a string_view
+         */
+        template <size_t N>
+        constexpr bool operator==(const const_string<N>& a, std::string_view b) noexcept
+        {
+            if (N != b.size()) {
+                return false;
+            }
+            else {
+                for (size_t i = 0; i < N; i++) {
+                    if (a.data[i] != b[i]) {
                         return false;
                     }
                 }

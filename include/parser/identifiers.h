@@ -102,10 +102,9 @@ namespace impl {
             name.alias = alias_tn.name;
             return name;
         },
-        tab_name_list(tab_name) >= [](TableName tn) { return TableNames{tn, 1}; },
-        tab_name_list(tab_name_list, ',', tab_name) >= [](TableNames table_names, char, TableName tn) {
-            table_names.push_back(tn);
-            return table_names;
+        tab_name_list(tab_name) >= [](TableName tn) { return TableNames{tn}; },
+        tab_name_list(tab_name, ',', tab_name) >= [](TableName tn1, char, TableName tn2) {
+            return TableNames{tn1, tn2};
         }
     );
 }

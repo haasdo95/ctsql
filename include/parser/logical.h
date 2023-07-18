@@ -11,7 +11,7 @@ namespace impl {
     static constexpr ctpg::nterm<BasicColumnName> basic_column_name{"basic_column_name"};
     static constexpr auto basic_column_name_rules = ctpg::rules(
             basic_column_name(sql_identifier) >= [](std::string_view cn) { return BasicColumnName("", cn); },
-            basic_column_name(sql_identifier, '.', sql_identifier) >= [](std::string_view tn, char, std::string_view cn) { return BasicColumnName(tn, cn); }
+            basic_column_name(single_entity_reference, '.', sql_identifier) >= [](std::string_view tn, char, std::string_view cn) { return BasicColumnName(tn, cn); }
     );
 
     static constexpr ctpg::char_term eq('=');

@@ -3,7 +3,7 @@ project(sql)
 
 set(CMAKE_CXX_STANDARD 20)
 
-add_executable(sql main.cpp)
+add_executable(sql main.cpp include/parser/preproc.h)
 target_sources(sql PUBLIC include dep)
 target_include_directories(sql PRIVATE include dep)
 
