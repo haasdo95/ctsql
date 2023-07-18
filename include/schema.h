@@ -13,10 +13,10 @@ namespace ctsql
 namespace impl {
     // CREDIT: https://stackoverflow.com/questions/28997271/c11-way-to-index-tuple-at-runtime-without-using-switch
     // a method to access tuple elements at run-time
-    template<typename ...Ts, size_t ...Is>
-    auto invoke_at_impl(std::tuple<Ts...>& tpl, std::index_sequence<Is...>, size_t idx)
+    template<typename TPred, typename ...Ts, size_t ...Is>
+    void invoke_at_impl(const std::tuple<Ts...>& tpl, std::index_sequence<Is...>, size_t idx, TPred pred)
     {
-        return ((void)(Is == idx && (std::get<Is>(tpl), true)), ...);
+        ((void)(Is == idx && (pred(std::get<Is>(tpl)), true)), ...);
         // for example: std::tuple<int, float, bool> `transformations` (idx == 1):
         //
         // Is... expansion    -> ((void)(0 == idx && (pred(std::get<0>(tpl)), true)), (void)(1 == idx && (pred(std::get<1>(tpl)), true)), (void)(2 == idx && (pred(std::get<2>(tpl)), true)));
@@ -26,9 +26,10 @@ namespace impl {
         // i.e. pred(std::get<1>(tpl) will be executed ONLY for idx == 1
     }
 
-    template<typename ...Ts>
-    auto invoke_at(std::tuple<Ts...>& tpl, size_t idx) {
-        return invoke_at_impl(tpl, std::make_index_sequence<sizeof...(Ts)>{}, idx);
+    template<typename TPred, typename ...Ts>
+    void invoke_at(const std::tuple<Ts...>& tpl, size_t idx, TPred pred)
+    {
+        invoke_at_impl(tpl, std::make_index_sequence<sizeof...(Ts)>{}, idx, pred);
     }
 
     template<typename T>
@@ -51,22 +52,47 @@ namespace impl {
         return std::distance(ml.begin(), pos);
     }
 
+    // TODO: we enforce the simplifying rule that the rhs of a where-condition has to be a literal
     template<Reflectable Schema>
-    auto make_getter(std::string_view column_name) {
-        const auto idx = get_index<Schema>(column_name);
-        return [&](const auto& tuple){ std::get<idx>(tuple); };
-    }
-
-    template<Reflectable Schema>
-    auto make_selector(BooleanFactor bf) {
-        return [&](const SchemaTuple<Schema>& s) -> bool {
-            const auto lhs = make_getter<Schema>(bf.lhs.column_name)(s);
-            if (std::holds_alternative<BasicColumnName>(bf.rhs)) {
-                const auto rhs = make_getter<Schema>(std::get<BasicColumnName>(bf.rhs).column_name)(s);
-                const auto cop = to_operator<decltype(lhs), decltype(rhs)>(bf.cop);
-                return cop(lhs, rhs);
-            }
-            throw std::runtime_error("not implemented");
+    auto make_selector(const BooleanFactor& bf) {
+        if (std::holds_alternative<BasicColumnName>(bf.rhs)) {
+            throw std::runtime_error("non-literal LHS of where conditions is not yet supported");
+        }
+        auto make_pred = [&bf](bool& result) {
+            auto pred = [&result, &bf](const auto& lhs_val) {
+                std::visit([&result, &bf, &lhs_val](const auto& rhs_val){
+                    if constexpr (std::three_way_comparable_with<decltype(lhs_val), decltype(rhs_val)>) {
+                        switch (bf.cop) {
+                            case CompOp::EQ:
+                                result = (lhs_val == rhs_val);
+                                break;
+                            case CompOp::GT:
+                                result = (lhs_val > rhs_val);
+                                break;
+                            case CompOp::LT:
+                                result = (lhs_val < rhs_val);
+                                break;
+                            case CompOp::GEQ:
+                                result = (lhs_val >= rhs_val);
+                                break;
+                            case CompOp::LEQ:
+                                result = (lhs_val <= rhs_val);
+                                break;
+                            default:
+                                result = (lhs_val != rhs_val);
+                                break;
+                        }
+                    }
+                }, bf.rhs);
+            };
+            return pred;
+        };
+        const std::size_t lhs_idx = get_index<Schema>(bf.lhs.column_name);
+        return [lhs_idx, make_pred](const SchemaTuple<Schema>& s) -> bool {
+            bool res = false;
+            auto pred = make_pred(res);
+            invoke_at(s, lhs_idx, pred);
+            return res;
         };
     }
 
@@ -97,7 +123,8 @@ namespace impl {
     }
 
     // schema object => tuple with field values
-    template<typename Schema>
+    // TODO: as of gcc-11, this doesn't work, giving error msg: "sorry, unimplemented: mangling error_mark"
+    template<Reflectable Schema>
     constexpr auto schema_to_tuple(const Schema& schema) -> SchemaTuple<Schema> {
         return refl::util::map_to_tuple(refl::reflect<Schema>().members, [&schema](auto td){
             return td(schema);

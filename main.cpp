@@ -24,8 +24,6 @@ struct Point {
     int y{};
     [[nodiscard]] double get_mag() const { return std::sqrt(static_cast<double>(x * x + y * y)); }
     std::string name;
-    auto operator<=>(const Point& other) const = default;
-//    bool operator==(const Point& other) const = default;
 };
 
 struct Vec {
@@ -71,17 +69,19 @@ using namespace ctsql;
 
 int main() {
     Point pt{1, 2, "lol"};
-    constexpr auto v = impl::get_index<Point>("name");
-    static_assert(v == 3);
+    Vec v{1, 2, 3, 4, "ha"};
+    BooleanFactor bf{CompOp::GT, BasicColumnName{"", "x"}, 1};
+//    const auto selector = impl::make_selector<Point>(bf);
+    auto t = impl::schema_to_tuple<Vec>(v);
 
-    BooleanFactor bf{CompOp::EQ, BasicColumnName{"", "x"}, BasicColumnName{"", "y"}};
+//    static_assert(std::is_same_v<decltype(t), int>);
+//    auto t = std::make_tuple(1, 2, 0.1, std::string("lol"));
+//    assert(selector(t));
 
-//    static constexpr char query_s[] = R"(select x from Point)";
+//
+//    static constexpr char query_s[] = R"(select y, x from Point)";
 //    static constexpr auto cbuf = ctpg::buffers::cstring_buffer(query_s);
 //    static constexpr auto res = ctsql::SelectParser::p.parse(cbuf).value();
-//    for (constexpr auto cn: res.cns) {
-//
-//    }
 
 //    auto selector = impl::make_selector<Point>(bf);
 
