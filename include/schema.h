@@ -10,26 +10,9 @@
 namespace ctsql
 {
 namespace impl {
-    // CREDIT: https://stackoverflow.com/questions/28997271/c11-way-to-index-tuple-at-runtime-without-using-switch
-    // a method to access tuple elements at run-time
-    template<typename TPred, typename ...Ts, size_t ...Is>
-    void invoke_at_impl(const std::tuple<Ts...>& tpl, std::index_sequence<Is...>, size_t idx, TPred pred)
-    {
-        ((void)(Is == idx && (pred(std::get<Is>(tpl)), true)), ...);
-        // for example: std::tuple<int, float, bool> `transformations` (idx == 1):
-        //
-        // Is... expansion    -> ((void)(0 == idx && (pred(std::get<0>(tpl)), true)), (void)(1 == idx && (pred(std::get<1>(tpl)), true)), (void)(2 == idx && (pred(std::get<2>(tpl)), true)));
-        //                    -> ((void)(false && (pred(std::get<0>(tpl)), true)), (void)(true && (pred(std::get<1>(tpl)), true)), (void)(false && (pred(std::get<2>(tpl)), true)));
-        // '&&' short-circuit -> ((void)(false), (void)(true && (pred(std::get<1>(tpl)), true)), (void)(false), true)));
-        //
-        // i.e. pred(std::get<1>(tpl) will be executed ONLY for idx == 1
-    }
-
-    template<typename TPred, typename ...Ts>
-    void invoke_at(const std::tuple<Ts...>& tpl, size_t idx, TPred pred)
-    {
-        invoke_at_impl(tpl, std::make_index_sequence<sizeof...(Ts)>{}, idx, pred);
-    }
+    enum class RHSTypeTag {
+        INT=0, DOUBLE, STRING
+    };
 
     template<typename T>
     concept Reflectable = refl::is_reflectable<T>() or std::is_void_v<T>;
@@ -116,29 +99,6 @@ namespace impl {
         return make_selectors_impl<Schema, lhs_indices, cop_list, rhs_types>(bfs, std::make_index_sequence<N>());
     }
 
-//    template<typename Schema>
-//    std::function<bool(const SchemaTuple<Schema>&)> and_construct(const BooleanAndTerms& bat) {
-//        std::function<bool(const SchemaTuple<Schema>&)> and_selector = [](const auto&){ return true; };
-//        for (const auto& bf: bat) {
-//            and_selector = [and_selector=std::move(and_selector), selector=make_selector<Schema>(bf)](const auto& tuple){
-//                return selector(tuple) and and_selector(tuple);
-//            };
-//        }
-//        return and_selector;
-//    }
-//
-//    template<typename Schema>
-//    std::function<bool(const SchemaTuple<Schema>&)> or_construct(const BooleanOrTerms& bot) {
-//        if (bot.empty()) { return [](const auto&){ return true; }; }  // empty condition -> take all
-//        std::function<bool(const SchemaTuple<Schema>&)> or_selector = [](const auto&){ return false; };
-//        for (const auto& bat: bot) {
-//            or_selector = [or_selector=std::move(or_selector), and_selector=and_construct<Schema>(bat)](const auto& tuple){
-//                return and_selector(tuple) or or_selector(tuple);
-//            };
-//        }
-//        return or_selector;
-//    }
-
     template<typename... Selectors>
     constexpr auto and_construct(Selectors... selector);
 
@@ -154,7 +114,7 @@ namespace impl {
         return [s](const auto& tuple){ return s(tuple); };
     }
 
-    // no filter -> true value; special case
+    // no filter -> true value always; special case
     template<>
     constexpr auto and_construct() {
         return [](const auto& tuple) { return true; };
@@ -175,7 +135,7 @@ namespace impl {
         return [s](const auto& tuple){ return s(tuple); };
     }
 
-    // no filter -> true value; special case
+    // no filter -> true value always; special case
     template<>
     constexpr auto or_construct() {
         return [](const auto& tuple) { return true; };
