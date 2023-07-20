@@ -1,8 +1,10 @@
 #ifndef SQL_COMMON_H
 #define SQL_COMMON_H
 
-#include <iosfwd>
+#include <iostream>
+#include <stdexcept>
 #include <utility>
+#include <cassert>
 #include "ctpg.hpp"
 
 namespace ctsql {

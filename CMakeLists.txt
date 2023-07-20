@@ -9,7 +9,8 @@ target_include_directories(sql PRIVATE include dep)
 
 # increase constexpr step limits
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    target_compile_options(sql PRIVATE -fconstexpr-steps=114514114514)
+    target_compile_options(sql PRIVATE -fconstexpr-steps=114114514)
+#    target_compile_options(sql PRIVATE -fcoroutines)
 elseif (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     target_compile_options(sql PRIVATE -fconstexpr-ops-limit=114514114514)
 else()

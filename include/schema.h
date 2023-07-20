@@ -4,7 +4,6 @@
 #include "refl.hpp"
 #include "parser/common.h"
 #include <concepts>
-#include <__generator.hpp>
 #include <variant>
 #include <tuple>
 
@@ -35,11 +34,16 @@ namespace impl {
     template<typename T>
     concept Reflectable = refl::is_reflectable<T>() or std::is_void_v<T>;
 
-    // TODO: this is atrocious; can we do better?
+    // schema object => tuple with field values
+    template<Reflectable Schema>
+    constexpr auto schema_to_tuple(const Schema& schema) {
+        return refl::util::map_to_tuple(refl::reflect<Schema>().members, [&schema](auto td){
+            return td(schema);
+        });
+    }
+
     template<Reflectable Schema> requires std::default_initializable<Schema>
-    using SchemaTuple = decltype(refl::util::map_to_tuple(refl::reflect<Schema>().members, [](auto td){
-        return td(Schema{});
-    }));
+    using SchemaTuple = decltype(schema_to_tuple(Schema{}));
 
     template<Reflectable Schema>
     static constexpr auto member_list = refl::util::map_to_array<std::string_view>(refl::reflect<Schema>().members,
@@ -54,7 +58,7 @@ namespace impl {
 
     // TODO: we enforce the simplifying rule that the rhs of a where-condition has to be a literal
     template<Reflectable Schema>
-    auto make_selector(const BooleanFactor& bf) {
+    constexpr auto make_selector(const BooleanFactor& bf) {
         if (std::holds_alternative<BasicColumnName>(bf.rhs)) {
             throw std::runtime_error("non-literal LHS of where conditions is not yet supported");
         }
@@ -96,6 +100,45 @@ namespace impl {
         };
     }
 
+    template<typename Schema>
+    std::function<bool(const SchemaTuple<Schema>&)> and_construct(const BooleanAndTerms& bat) {
+        std::function<bool(const SchemaTuple<Schema>&)> and_selector = [](const auto&){ return true; };
+        for (const auto& bf: bat) {
+            and_selector = [and_selector=std::move(and_selector), selector=make_selector<Schema>(bf)](const auto& tuple){
+                return selector(tuple) and and_selector(tuple);
+            };
+        }
+        return and_selector;
+    }
+
+    template<typename Schema>
+    std::function<bool(const SchemaTuple<Schema>&)> or_construct(const BooleanOrTerms& bot) {
+        if (bot.empty()) { return [](const auto&){ return true; }; }  // empty condition -> take all
+        std::function<bool(const SchemaTuple<Schema>&)> or_selector = [](const auto&){ return false; };
+        for (const auto& bat: bot) {
+            or_selector = [or_selector=std::move(or_selector), and_selector=and_construct<Schema>(bat)](const auto& tuple){
+                return and_selector(tuple) or or_selector(tuple);
+            };
+        }
+        return or_selector;
+    }
+
+//    template<typename... Selectors>
+//    auto and_construct(Selectors... selector);
+//
+//    template<typename Selector, typename... Selectors>
+//    auto and_construct(Selector s, Selectors... selectors) {
+//        const auto rec = and_construct(selectors...);
+//        return [s, rec](auto tuple){ return s(tuple) and rec(tuple); };
+//    }
+//
+//    template<>
+//    auto and_construct() {
+//        return [](auto tuple) { return true; };
+//    }
+
+
+
     template<Reflectable Schema>
     constexpr auto resolve_name(std::string_view column_name) noexcept -> std::optional<refl::type_descriptor<Schema>> {
         constexpr auto schema_td = refl::reflect<Schema>();
@@ -108,7 +151,7 @@ namespace impl {
     }
 
     template<Reflectable S1, Reflectable S2>
-    constexpr auto resolve_name(std::string_view column_name) -> std::variant<refl::type_descriptor<S1>, refl::type_descriptor<S2>> {
+    constexpr auto resolve_name(std::string_view column_name) -> const char* {
         auto td1 = resolve_name<S1>(column_name);
         auto td2 = resolve_name<S2>(column_name);
         if (td1 and td2) {
@@ -116,32 +159,12 @@ namespace impl {
         } else if (!td1 and !td2) {
             throw std::runtime_error("cannot resolve column name");
         } else if (td1) {
-            return td1.value();
+            return "0";
         } else {
-            return td2.value();
+            return "1";
         }
     }
-
-    // schema object => tuple with field values
-    // TODO: as of gcc-11, this doesn't work, giving error msg: "sorry, unimplemented: mangling error_mark"
-    template<Reflectable Schema>
-    constexpr auto schema_to_tuple(const Schema& schema) -> SchemaTuple<Schema> {
-        return refl::util::map_to_tuple(refl::reflect<Schema>().members, [&schema](auto td){
-            return td(schema);
-        });
-    }
 }
 }
-
-
-
-//template<typename Schema>
-//struct Stream {
-//    using type = Schema;
-//    static constexpr std::array members = refl::util::map_to_array<std::string_view>(refl::reflect<Schema>().members, [](auto td){
-//        return std::string_view(td.name.data, td.name.size);
-//    });
-//    std::generator<schema_tuple_type<Schema>> gen;
-//};
 
 #endif //SQL_SCHEMA_H
