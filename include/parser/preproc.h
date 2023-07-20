@@ -6,6 +6,32 @@
 
 namespace ctsql {
 namespace impl {
+    template<Reflectable Schema>
+    constexpr auto resolve_name(std::string_view column_name) noexcept -> std::optional<refl::type_descriptor<Schema>> {
+        constexpr auto schema_td = refl::reflect<Schema>();
+        constexpr auto ml = refl::util::map_to_array<std::string_view>(schema_td.members, [](auto td){return td.name.str_view();});
+        if (std::find(ml.begin(), ml.end(), column_name) != ml.end()) {
+            return schema_td;
+        } else {
+            return std::nullopt;
+        }
+    }
+
+    template<Reflectable S1, Reflectable S2>
+    constexpr auto resolve_name(std::string_view column_name) -> const char* {
+        auto td1 = resolve_name<S1>(column_name);
+        auto td2 = resolve_name<S2>(column_name);
+        if (td1 and td2) {
+            throw std::runtime_error("ambiguous column name");
+        } else if (!td1 and !td2) {
+            throw std::runtime_error("cannot resolve column name");
+        } else if (td1) {
+            return "0";
+        } else {
+            return "1";
+        }
+    }
+
     constexpr auto dealias_query(Query query) {
         if (not query.tns.first.alias.empty()
             and query.tns.second and query.tns.first.alias==query.tns.second.value().alias) {
@@ -45,11 +71,9 @@ namespace impl {
     template<Reflectable S1, Reflectable S2=void>
     constexpr auto resolve_table_name(Query query) {
         auto substitute = [&query](auto& cn) {
-//            constexpr std::string_view s1_name = refl::reflect<S1>().name.str_view();
             if constexpr (std::is_void_v<S2>) {  // only one table
                 cn.table_name = "0";
             } else {
-//                constexpr std::string_view s2_name = refl::reflect<S2>().name.str_view();
                 if (cn.table_name.empty()) {  // no disambiguation available
                     cn.table_name = resolve_name<S1, S2>(cn.column_name);;
                 }
@@ -127,23 +151,6 @@ namespace impl {
         }
         return result;
     }
-
-    template<Reflectable Schema, std::size_t N, std::size_t... Idx>
-    constexpr auto make_selectors_impl(const std::array<BooleanFactor, N>& bfs, std::index_sequence<Idx...>) {
-        return std::make_tuple(make_selector<Schema>(bfs[Idx])...);
-    }
-
-    template<Reflectable Schema, std::size_t N>
-    constexpr auto make_selectors(const std::array<BooleanFactor, N>& bfs) {
-        return make_selectors_impl<Schema>(bfs, std::make_index_sequence<N>());
-    }
-
-    template<Reflectable S1, Reflectable S2> requires requires { not (std::is_same_v<S1, S2> or std::is_void_v<S1> or std::is_void_v<S2>); }
-    auto sift_where_conditions(const BooleanOrTerms& conditions) {
-        BooleanOrTerms conditions_1, conditions_2;
-
-    }
-
 }
 }
 

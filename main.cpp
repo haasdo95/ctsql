@@ -68,41 +68,6 @@ int main() {
     Point pt{1, 2, "lol"};
     Vec v{1, 2, 3, 4, "ha"};
 
-//    const auto members = (refl::reflect<Point>().members);
-//    static_assert(std::is_same_v<int, decltype(std::get<0>(members)(Point{}))>);
-
-//    auto t = impl::schema_to_tuple<Point>(pt);
-//    std::cout << std::get<0>(t) << std::get<1>(t) << std::get<2>(t) << std::get<3>(t) << std::endl;
-//
-//    static constexpr BooleanFactor leq_bf{CompOp::LEQ, BasicColumnName{"", "x"}, 1};
-//    static constexpr auto selector = impl::make_selector<Point>(leq_bf);
-//    assert(selector(impl::schema_to_tuple(pt)));
-
-//    BooleanFactor geq_bf{CompOp::GEQ, BasicColumnName{"", "x"}, 1};
-//    BooleanFactor y_neq_bf{CompOp::NEQ, BasicColumnName{"", "y"}, 2};
-//
-//    BooleanFactor mag_bf{CompOp::GT, BasicColumnName{"", "get_mag"}, 1};
-//
-//
-//    BooleanAndTerms bat;
-//    bat.push_back(leq_bf); bat.push_back(geq_bf); bat.push_back(y_neq_bf);
-//    BooleanAndTerms bat_1{mag_bf, 1};
-//
-//    BooleanOrTerms bot;
-//    bot.push_back(bat); bot.push_back(bat_1);
-//
-//    const auto and_cons = impl::and_construct<Point>(bat);
-//    assert(!and_cons(t));
-//
-//    const auto or_cons = impl::or_construct<Point>(bot);
-//    assert(or_cons(t));
-
-//
-//    static constexpr char query_s[] = R"(select y, x from Point)";
-//    static constexpr auto cbuf = ctpg::buffers::cstring_buffer(query_s);
-//    static constexpr auto res = ctsql::SelectParser::p.parse(cbuf).value();
-
-
     static constexpr char query_s[] = R"(SELECT V.name, pt.name, P.x as X, y1 as Y, SUM(y) FROM pt P, v as V
                                          ON x=x1 AND y=V.y1 WHERE x1 > 3 AND get_mag >= 1 AND x2 <= 4 OR 78 <= P.x AND v.name="lol" AND y2 < 3)";
 
@@ -148,38 +113,19 @@ int main() {
         std::cout << std::endl;
     }
 
+    static constexpr auto indices = impl::make_lhs_indices<Point>(cnf[1]);
+    static constexpr auto cop_list = impl::make_cop_list(cnf[1]);
+    static constexpr auto rhs_types = impl::make_rhs_type_list(cnf[1]);
+
     const auto t = impl::schema_to_tuple(pt);
 
-    static constexpr auto ss = impl::make_selectors<Point>(cnf[1]);
+    static constexpr auto ss = impl::make_selectors<Point, indices, cop_list, rhs_types>(cnf[1]);
     assert(std::get<0>(ss)(t));
     assert(!std::get<1>(ss)(t));
 
+    static constexpr auto and_cons = std::apply([](auto&&... args) { return impl::and_construct(args...); }, ss);
+    assert(!and_cons(t));
 
-//
-//    std::cout << refl::reflect<Point>().name << std::endl;
-//
-//    Stream<Point> s;
-//    for (const auto& n: Stream<Point>::members) {
-//        std::cout << n << " ";
-//    }
-
-//    static constexpr char c_names[] = R"(select "S-2".name "123", height AS HEIGHT, 'Student.age' s_age
-//                                         FROM "Student" as "S-1", School 'S-2'
-//                                         ON "S-1".loc = "S-2".loc and NOT "S-1".age < "S-2".age
-//                                         where not height=173 AND name="smith" OR NOT age >= 8 AND School.loc <> 'NY')";
-//
-//    auto buf = ctpg::buffers::string_buffer(c_names);
-//    auto res = ctsql::SelectParser::p.parse(buf, std::cerr).value();
-
-//    static constexpr auto cbuf = ctpg::buffers::cstring_buffer(c_names);
-//    constexpr auto res = ctsql::SelectParser::p.parse(cbuf).value();
-
-//    ctsql::print(std::cout, res.cns, ", ") << std::endl;
-//    std::cout << res.tns << std::endl;
-//    ctsql::print(std::cout, res.join_condition, " AND ");
-//    std::cout << std::endl;
-//    for (const auto& bat: res.where_condition) {
-//        ctsql::print(std::cout, bat, " AND ");
-//        std::cout << std::endl;
-//    }
+    static constexpr auto or_cons = std::apply([](auto&&... args) { return impl::or_construct(args...); }, ss);
+    assert(or_cons(t));
 }

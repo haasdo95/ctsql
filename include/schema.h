@@ -56,114 +56,131 @@ namespace impl {
         return std::distance(ml.begin(), pos);
     }
 
+    template<Reflectable Schema, std::size_t N>
+    constexpr auto make_lhs_indices(const std::array<BooleanFactor, N>& bfs) {
+        std::array<std::size_t, N> indices;
+        for (size_t i=0; i<N; ++i) {
+            indices[i] = get_index<Schema>(bfs[i].lhs.column_name);
+        }
+        return indices;
+    }
+
+    template<std::size_t N>
+    constexpr auto make_cop_list(const std::array<BooleanFactor, N>& bfs) {
+        std::array<CompOp, N> cops;
+        for (size_t i=0; i<N; ++i) {
+            cops[i] = bfs[i].cop;
+        }
+        return cops;
+    }
+
+    template<std::size_t N>
+    constexpr auto make_rhs_type_list(const std::array<BooleanFactor, N>& bfs) {
+        std::array<RHSTypeTag, N> rhs_types;
+        for (size_t i=0; i<N; ++i) {
+            if (std::holds_alternative<int64_t>(bfs[i].rhs)) {
+                rhs_types[i] = RHSTypeTag::INT;
+            } else if (std::holds_alternative<double>(bfs[i].rhs)) {
+                rhs_types[i] = RHSTypeTag::DOUBLE;
+            } else if (std::holds_alternative<std::string_view>(bfs[i].rhs)) {
+                rhs_types[i] = RHSTypeTag::STRING;
+            } else {
+                throw std::runtime_error("non-literal RHS in where conditions is not supported");
+            }
+        }
+        return rhs_types;
+    }
+
     // TODO: we enforce the simplifying rule that the rhs of a where-condition has to be a literal
-    template<Reflectable Schema>
+    template<Reflectable Schema, size_t lhs_idx, CompOp cop, RHSTypeTag rhs_type>
     constexpr auto make_selector(const BooleanFactor& bf) {
         if (std::holds_alternative<BasicColumnName>(bf.rhs)) {
             throw std::runtime_error("non-literal LHS of where conditions is not yet supported");
         }
-        auto make_pred = [&bf](bool& result) {
-            auto pred = [&result, &bf](const auto& lhs_val) {
-                std::visit([&result, &bf, &lhs_val](const auto& rhs_val){
-                    if constexpr (std::three_way_comparable_with<decltype(lhs_val), decltype(rhs_val)>) {
-                        switch (bf.cop) {
-                            case CompOp::EQ:
-                                result = (lhs_val == rhs_val);
-                                break;
-                            case CompOp::GT:
-                                result = (lhs_val > rhs_val);
-                                break;
-                            case CompOp::LT:
-                                result = (lhs_val < rhs_val);
-                                break;
-                            case CompOp::GEQ:
-                                result = (lhs_val >= rhs_val);
-                                break;
-                            case CompOp::LEQ:
-                                result = (lhs_val <= rhs_val);
-                                break;
-                            default:
-                                result = (lhs_val != rhs_val);
-                                break;
-                        }
-                    }
-                }, bf.rhs);
-            };
-            return pred;
-        };
-        const std::size_t lhs_idx = get_index<Schema>(bf.lhs.column_name);
-        return [lhs_idx, make_pred](const SchemaTuple<Schema>& s) -> bool {
-            bool res = false;
-            auto pred = make_pred(res);
-            invoke_at(s, lhs_idx, pred);
-            return res;
+        const auto comp_f = to_operator<cop>();
+        using RHS = std::conditional_t<rhs_type==RHSTypeTag::INT,
+                                       int64_t,
+                                       std::conditional_t<rhs_type==RHSTypeTag::DOUBLE, double, std::string_view>>;
+        return [comp_f, &bf](const SchemaTuple<Schema>& s) -> bool {
+            return comp_f(std::get<lhs_idx>(s), std::get<RHS>(bf.rhs));
         };
     }
 
-    template<typename Schema>
-    std::function<bool(const SchemaTuple<Schema>&)> and_construct(const BooleanAndTerms& bat) {
-        std::function<bool(const SchemaTuple<Schema>&)> and_selector = [](const auto&){ return true; };
-        for (const auto& bf: bat) {
-            and_selector = [and_selector=std::move(and_selector), selector=make_selector<Schema>(bf)](const auto& tuple){
-                return selector(tuple) and and_selector(tuple);
-            };
-        }
-        return and_selector;
+    template<Reflectable Schema, std::array lhs_indices, std::array cop_list, std::array rhs_types, std::size_t N, std::size_t... Idx>
+    constexpr auto make_selectors_impl(const std::array<BooleanFactor, N>& bfs, std::index_sequence<Idx...>) {
+        return std::make_tuple(make_selector<Schema, lhs_indices[Idx], cop_list[Idx], rhs_types[Idx]>(bfs[Idx])...);
     }
 
-    template<typename Schema>
-    std::function<bool(const SchemaTuple<Schema>&)> or_construct(const BooleanOrTerms& bot) {
-        if (bot.empty()) { return [](const auto&){ return true; }; }  // empty condition -> take all
-        std::function<bool(const SchemaTuple<Schema>&)> or_selector = [](const auto&){ return false; };
-        for (const auto& bat: bot) {
-            or_selector = [or_selector=std::move(or_selector), and_selector=and_construct<Schema>(bat)](const auto& tuple){
-                return and_selector(tuple) or or_selector(tuple);
-            };
-        }
-        return or_selector;
+    template<Reflectable Schema, std::array lhs_indices, std::array cop_list, std::array rhs_types, std::size_t N>
+    constexpr auto make_selectors(const std::array<BooleanFactor, N>& bfs) {
+        return make_selectors_impl<Schema, lhs_indices, cop_list, rhs_types>(bfs, std::make_index_sequence<N>());
     }
 
-//    template<typename... Selectors>
-//    auto and_construct(Selectors... selector);
-//
-//    template<typename Selector, typename... Selectors>
-//    auto and_construct(Selector s, Selectors... selectors) {
-//        const auto rec = and_construct(selectors...);
-//        return [s, rec](auto tuple){ return s(tuple) and rec(tuple); };
+//    template<typename Schema>
+//    std::function<bool(const SchemaTuple<Schema>&)> and_construct(const BooleanAndTerms& bat) {
+//        std::function<bool(const SchemaTuple<Schema>&)> and_selector = [](const auto&){ return true; };
+//        for (const auto& bf: bat) {
+//            and_selector = [and_selector=std::move(and_selector), selector=make_selector<Schema>(bf)](const auto& tuple){
+//                return selector(tuple) and and_selector(tuple);
+//            };
+//        }
+//        return and_selector;
 //    }
 //
-//    template<>
-//    auto and_construct() {
-//        return [](auto tuple) { return true; };
+//    template<typename Schema>
+//    std::function<bool(const SchemaTuple<Schema>&)> or_construct(const BooleanOrTerms& bot) {
+//        if (bot.empty()) { return [](const auto&){ return true; }; }  // empty condition -> take all
+//        std::function<bool(const SchemaTuple<Schema>&)> or_selector = [](const auto&){ return false; };
+//        for (const auto& bat: bot) {
+//            or_selector = [or_selector=std::move(or_selector), and_selector=and_construct<Schema>(bat)](const auto& tuple){
+//                return and_selector(tuple) or or_selector(tuple);
+//            };
+//        }
+//        return or_selector;
 //    }
 
+    template<typename... Selectors>
+    constexpr auto and_construct(Selectors... selector);
 
-
-    template<Reflectable Schema>
-    constexpr auto resolve_name(std::string_view column_name) noexcept -> std::optional<refl::type_descriptor<Schema>> {
-        constexpr auto schema_td = refl::reflect<Schema>();
-        constexpr auto ml = refl::util::map_to_array<std::string_view>(schema_td.members, [](auto td){return td.name.str_view();});
-        if (std::find(ml.begin(), ml.end(), column_name) != ml.end()) {
-            return schema_td;
-        } else {
-            return std::nullopt;
-        }
+    template<typename Selector, typename... Selectors>
+    constexpr auto and_construct(Selector s, Selectors... selectors) {
+        const auto rec = and_construct(selectors...);
+        return [s, rec](const auto& tuple){ return s(tuple) and rec(tuple); };
     }
 
-    template<Reflectable S1, Reflectable S2>
-    constexpr auto resolve_name(std::string_view column_name) -> const char* {
-        auto td1 = resolve_name<S1>(column_name);
-        auto td2 = resolve_name<S2>(column_name);
-        if (td1 and td2) {
-            throw std::runtime_error("ambiguous column name");
-        } else if (!td1 and !td2) {
-            throw std::runtime_error("cannot resolve column name");
-        } else if (td1) {
-            return "0";
-        } else {
-            return "1";
-        }
+    // actual base case
+    template<typename Selector>
+    constexpr auto and_construct(Selector s) {
+        return [s](const auto& tuple){ return s(tuple); };
     }
+
+    // no filter -> true value; special case
+    template<>
+    constexpr auto and_construct() {
+        return [](const auto& tuple) { return true; };
+    }
+
+    template<typename... Selectors>
+    constexpr auto or_construct(Selectors... selector);
+
+    template<typename Selector, typename... Selectors>
+    constexpr auto or_construct(Selector s, Selectors... selectors) {
+        const auto rec = or_construct(selectors...);
+        return [s, rec](const auto& tuple){ return s(tuple) or rec(tuple); };
+    }
+
+    // actual base case
+    template<typename Selector>
+    constexpr auto or_construct(Selector s) {
+        return [s](const auto& tuple){ return s(tuple); };
+    }
+
+    // no filter -> true value; special case
+    template<>
+    constexpr auto or_construct() {
+        return [](const auto& tuple) { return true; };
+    }
+
 }
 }
 

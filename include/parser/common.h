@@ -39,10 +39,49 @@ namespace ctsql {
         return os;
     }
 
+    template<typename L, typename R> requires std::three_way_comparable_with<L, R>
+    using comp_fptr = bool (*) (const L&, const R&);
 
     enum class CompOp {
         EQ = 0, GT, LT, GEQ, LEQ, NEQ
     };
+    template<typename L, typename R>
+    constexpr comp_fptr<L, R> to_operator(CompOp cop) {
+        switch (cop) {
+            case CompOp::EQ:
+                return [](const L& lhs, const R& rhs){ return lhs == rhs; };
+            case CompOp::GT:
+                return [](const L& lhs, const R& rhs){ return lhs > rhs; };
+            case CompOp::LT:
+                return [](const L& lhs, const R& rhs){ return lhs < rhs; };
+            case CompOp::GEQ:
+                return [](const L& lhs, const R& rhs){ return lhs >= rhs; };
+            case CompOp::LEQ:
+                return [](const L& lhs, const R& rhs){ return lhs <= rhs; };
+            case CompOp::NEQ:
+                return [](const L& lhs, const R& rhs){ return lhs != rhs; };
+        }
+        throw std::runtime_error("unknown comp op");
+    }
+
+    template<CompOp cop>
+    constexpr auto to_operator() {
+        if constexpr (cop == CompOp::EQ)
+            return [](const auto& lhs, const auto& rhs){ return lhs == rhs; };
+        else if constexpr (cop == CompOp::GT)
+            return [](const auto& lhs, const auto& rhs){ return lhs > rhs; };
+        else if constexpr (cop == CompOp::LT)
+            return [](const auto& lhs, const auto& rhs){ return lhs < rhs; };
+        else if constexpr (cop == CompOp::GEQ)
+            return [](const auto& lhs, const auto& rhs){ return lhs >= rhs; };
+        else if constexpr (cop == CompOp::LEQ)
+            return [](const auto& lhs, const auto& rhs){ return lhs <= rhs; };
+        else {
+            static_assert(cop == CompOp::NEQ);
+            return [](const auto& lhs, const auto& rhs){ return lhs != rhs; };
+        }
+    }
+
     constexpr CompOp invert(CompOp cop) {
         switch (cop) {
             case CompOp::EQ:
@@ -223,6 +262,10 @@ namespace ctsql {
         constexpr Query() = default;
         constexpr Query(ColumnNames cns, TableNames tns, BooleanAndTerms join_condition, BooleanOrTerms where_condition):
             cns{cns}, tns{tns}, join_condition{join_condition}, where_condition{where_condition} {}
+    };
+
+    enum class RHSTypeTag {
+        INT=0, DOUBLE, STRING
     };
 
 }
