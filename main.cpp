@@ -69,7 +69,7 @@ int main() {
     Vec v{1, 2, 3, 4, "ha"};
 
     static constexpr char query_s[] = R"(SELECT V.name, pt.name, P.x as X, y1 as Y, SUM(y) FROM pt P, v as V
-                                         ON x=x1 AND y=V.y1 WHERE x1 > 3 AND get_mag >= 1 AND x2 <= 4 OR 78 <= P.x AND v.name="lol" AND y2 < 3)";
+                                         ON x=x1 AND y=V.y1 WHERE x1 > 3 AND get_mag <= 1 OR x > 88)";
 
     static constexpr auto cbuf = ctpg::buffers::cstring_buffer(query_s);
     static constexpr auto res = ctsql::SelectParser::p.parse(cbuf).value();
@@ -112,20 +112,62 @@ int main() {
         }
         std::cout << std::endl;
     }
+    std::cout << std::endl;
 
-    static constexpr auto indices = impl::make_lhs_indices<Point>(cnf[1]);
-    static constexpr auto cop_list = impl::make_cop_list(cnf[1]);
-    static constexpr auto rhs_types = impl::make_rhs_type_list(cnf[1]);
+    static constexpr auto sifted = impl::sift(cnf);
+    static constexpr size_t t0_end = std::get<0>(sifted);
+    static constexpr size_t t1_end = std::get<1>(sifted);
+    static constexpr auto sifted_cnf = std::get<2>(sifted);
 
-    const auto t = impl::schema_to_tuple(pt);
+    for (size_t i=0; i<num_clauses; ++i) {
+        for (size_t j=0; j<num_terms; ++j) {
+            std::cout << sifted_cnf[i][j] << " ";
+        }
+        std::cout << std::endl;
+    }
 
-    static constexpr auto ss = impl::make_selectors<Point, indices, cop_list, rhs_types>(cnf[1]);
-    assert(std::get<0>(ss)(t));
-    assert(!std::get<1>(ss)(t));
+    static constexpr auto sift_split = impl::split_sifted<t0_end, t1_end>(sifted_cnf);
+    static constexpr auto t0 = std::get<0>(sift_split);
+    static constexpr auto t1 = std::get<1>(sift_split);
+    static constexpr auto mixed = std::get<2>(sift_split);
 
-    static constexpr auto and_cons = std::apply([](auto&&... args) { return impl::and_construct(args...); }, ss);
-    assert(!and_cons(t));
+    auto print_arr = [](const auto& arr) {
+        std::cout << "AND( ";
+        for (const auto& bfs: arr) {
+            std::cout << "OR( ";
+            for (const auto& v: bfs) {
+                std::cout << v << " || ";
+            }
+            std::cout << ")" << std::endl;
+        }
+        std::cout << ")" << std::endl;
+    };
+    std::cout << "t0: \n";
+    print_arr(t0);
+    std::cout << "t1: \n";
+    print_arr(t1);
+    std::cout << "mixed: \n";
+    print_arr(mixed);
 
-    static constexpr auto or_cons = std::apply([](auto&&... args) { return impl::or_construct(args...); }, ss);
-    assert(or_cons(t));
+    static constexpr auto t0_selector = impl::make_cnf_selector<Point, impl::make_lhs_indices<Point>(t0), impl::make_cop_list(t0), impl::make_rhs_type_list(t0)>(t0);
+    static constexpr auto t1_selector = impl::make_cnf_selector<Vec, impl::make_lhs_indices<Vec>(t1), impl::make_cop_list(t1), impl::make_rhs_type_list(t1)>(t1);
+
+    assert(!t0_selector(impl::schema_to_tuple(pt)));
+    assert(t1_selector(impl::schema_to_tuple(v)));
+
+//    static constexpr auto indices = impl::make_lhs_indices<Point>(cnf[1]);
+//    static constexpr auto cop_list = impl::make_cop_list(cnf[1]);
+//    static constexpr auto rhs_types = impl::make_rhs_type_list(cnf[1]);
+//
+//    const auto t = impl::schema_to_tuple(pt);
+//
+//    static constexpr auto ss = impl::make_selectors<Point, indices, cop_list, rhs_types>(cnf[1]);
+//    assert(std::get<0>(ss)(t));
+//    assert(!std::get<1>(ss)(t));
+//
+//    static constexpr auto and_cons = std::apply([](auto&&... args) { return impl::and_construct(args...); }, ss);
+//    assert(!and_cons(t));
+//
+//    static constexpr auto or_cons = std::apply([](auto&&... args) { return impl::or_construct(args...); }, ss);
+//    assert(or_cons(t));
 }

@@ -215,6 +215,7 @@ namespace ctsql {
         BasicColumnName lhs;
         RHSType rhs;
         constexpr BooleanFactor() = default;
+        constexpr BooleanFactor(const BooleanFactor&) = default;
         constexpr BooleanFactor(CompOp cop, BasicColumnName lhs, RHSType rhs): cop{cop}, lhs{lhs}, rhs{rhs} {}
         friend std::ostream& operator<<(std::ostream& os, BooleanFactor be) {
             os << be.lhs << ' ' << be.cop << ' ';
