@@ -208,38 +208,45 @@ namespace ctsql {
         return os;
     }
 
-    // we assume that at least one side of the clause will be a column name reference
+    // we assume that one side of the clause will be a column name reference
+    template<bool one_side=true>
     struct BooleanFactor {
-        using RHSType = std::variant<BasicColumnName, std::string_view, int64_t, double>;
+        using RHSType = std::conditional_t<one_side, std::variant<std::string_view, int64_t, double>, BasicColumnName>;
         CompOp cop{};
         BasicColumnName lhs;
         RHSType rhs;
         constexpr BooleanFactor() = default;
         constexpr BooleanFactor(const BooleanFactor&) = default;
         constexpr BooleanFactor(CompOp cop, BasicColumnName lhs, RHSType rhs): cop{cop}, lhs{lhs}, rhs{rhs} {}
-        friend std::ostream& operator<<(std::ostream& os, BooleanFactor be) {
-            os << be.lhs << ' ' << be.cop << ' ';
-            std::visit([&os](auto v) {
-                if constexpr (std::is_same_v<decltype(v), std::string_view>) {
-                    os << '\"' << v << '\"';
-                } else {
-                    os << v;
-                }
-            }, be.rhs);
-            return os;
-        }
     };
+    template<bool one_side>
+    std::ostream& operator<<(std::ostream& os, BooleanFactor<one_side> be) {
+        os << be.lhs << ' ' << be.cop << ' ';
+        if constexpr (one_side) {
+            std::visit([&os](auto v) {
+            if constexpr (std::is_same_v<decltype(v), std::string_view>) {
+                os << '\"' << v << '\"';
+            } else {
+                os << v;
+            }}, be.rhs);
+        } else {
+            os << be.rhs;
+        }
+        return os;
+    }
 
-    using BooleanAndTerms = ctpg::stdex::cvector<BooleanFactor, MaxAndTerms>;
-    using BooleanOrTerms = ctpg::stdex::cvector<BooleanAndTerms, MaxOrTerms>;
+    template<bool one_side>
+    using BooleanAndTerms = ctpg::stdex::cvector<BooleanFactor<one_side>, MaxAndTerms>;
+    template<bool one_side>
+    using BooleanOrTerms = ctpg::stdex::cvector<BooleanAndTerms<one_side>, MaxOrTerms>;
 
     struct Query {
         ColumnNames cns;
         TableNames tns;
-        BooleanAndTerms join_condition;
-        BooleanOrTerms where_condition;
+        BooleanOrTerms<false> join_condition;
+        BooleanOrTerms<true> where_condition;
         constexpr Query() = default;
-        constexpr Query(ColumnNames cns, TableNames tns, BooleanAndTerms join_condition, BooleanOrTerms where_condition):
+        constexpr Query(ColumnNames cns, TableNames tns, BooleanOrTerms<false> join_condition, BooleanOrTerms<true> where_condition):
             cns{cns}, tns{tns}, join_condition{join_condition}, where_condition{where_condition} {}
     };
 

@@ -76,7 +76,9 @@ int main() {
 
 //    ctsql::print(std::cout, res.cns, ", ") << std::endl;
 //    std::cout << res.tns << std::endl;
-//    ctsql::print(std::cout, res.join_condition, " AND ") << std::endl;
+//    for (const auto& bat: res.join_condition) {
+//        ctsql::print(std::cout, bat, " AND ") << std::endl;
+//    }
 //    for (const auto& bat: res.where_condition) {
 //        ctsql::print(std::cout, bat, " AND ") << std::endl;
 //    }
@@ -84,22 +86,15 @@ int main() {
 //    std::cout << std::endl;
 
     static constexpr auto pp_res = ctsql::impl::dealias_query(res);
-//    ctsql::print(std::cout, pp_res.cns, ", ") << std::endl;
-//    std::cout << pp_res.tns << std::endl;
-//    ctsql::print(std::cout, pp_res.join_condition, " AND ") << std::endl;
-//    for (const auto& bat: pp_res.where_condition) {
-//        ctsql::print(std::cout, bat, " AND ") << std::endl;
-//    }
-//
-//    std::cout << std::endl;
-
     static constexpr auto resolv_res = ctsql::impl::resolve_table_name<Point, Vec>(pp_res);
-//    ctsql::print(std::cout, resolv_res.cns, ", ") << std::endl;
-//    std::cout << resolv_res.tns << std::endl;
-//    ctsql::print(std::cout, resolv_res.join_condition, " AND ") << std::endl;
-//    for (const auto& bat: resolv_res.where_condition) {
-//        ctsql::print(std::cout, bat, " AND ") << std::endl;
-//    }
+    ctsql::print(std::cout, resolv_res.cns, ", ") << std::endl;
+    std::cout << resolv_res.tns << std::endl;
+    for (const auto& bat: resolv_res.join_condition) {
+        ctsql::print(std::cout, bat, " AND ") << std::endl;
+    }
+    for (const auto& bat: resolv_res.where_condition) {
+        ctsql::print(std::cout, bat, " AND ") << std::endl;
+    }
 
     static constexpr auto num_terms = resolv_res.where_condition.size();
     static constexpr auto num_clauses = impl::compute_number_of_cnf_clauses(resolv_res.where_condition);
@@ -132,9 +127,9 @@ int main() {
     static constexpr auto mixed = std::get<2>(sift_split);
 
     auto print_arr = [](const auto& arr) {
-        std::cout << "AND( ";
+        std::cout << "AND( \n";
         for (const auto& bfs: arr) {
-            std::cout << "OR( ";
+            std::cout << "\tOR( ";
             for (const auto& v: bfs) {
                 std::cout << v << " || ";
             }
@@ -149,11 +144,16 @@ int main() {
     std::cout << "mixed: \n";
     print_arr(mixed);
 
-    static constexpr auto t0_selector = impl::make_cnf_selector<Point, impl::make_lhs_indices<Point>(t0), impl::make_cop_list(t0), impl::make_rhs_type_list(t0)>(t0);
-    static constexpr auto t1_selector = impl::make_cnf_selector<Vec, impl::make_lhs_indices<Vec>(t1), impl::make_cop_list(t1), impl::make_rhs_type_list(t1)>(t1);
+    static constexpr auto t0_selector = impl::make_cnf_selector<Point, void, impl::make_lhs_indices<Point, void>(t0), impl::make_cop_list(t0), impl::make_rhs_type_list(t0)>(t0);
+    static constexpr auto t1_selector = impl::make_cnf_selector<Vec, void, impl::make_lhs_indices<Vec, void>(t1), impl::make_cop_list(t1), impl::make_rhs_type_list(t1)>(t1);
 
     assert(!t0_selector(impl::schema_to_tuple(pt)));
     assert(t1_selector(impl::schema_to_tuple(v)));
+
+    static constexpr auto mixed_selector = impl::make_cnf_selector<Point, Vec, impl::make_lhs_indices<Point, Vec>(mixed), impl::make_cop_list(mixed), impl::make_rhs_type_list(mixed)>(mixed);
+    assert(!mixed_selector(impl::schema_to_tuple_2(pt, v)));
+
+
 
 //    static constexpr auto indices = impl::make_lhs_indices<Point>(cnf[1]);
 //    static constexpr auto cop_list = impl::make_cop_list(cnf[1]);

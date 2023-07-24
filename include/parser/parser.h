@@ -16,25 +16,48 @@ namespace ctsql {
     static constexpr auto query_rules = ctpg::rules(
         query(impl::select_kw, impl::col_name_list,
               impl::from_kw, impl::tab_name, ',', impl::tab_name,
-              impl::on_kw, impl::boolean_and_terms,
-              impl::where_kw, impl::boolean_or_terms) >=
-            [](std::string_view, ColumnNames cns, std::string_view, TableName tn1, char, TableName tn2, std::string_view, BooleanAndTerms bat, std::string_view, BooleanOrTerms bot) {
+              impl::on_kw, impl::boolean_or_terms_two_side,
+              impl::where_kw, impl::boolean_or_terms_one_side) >=
+            [](std::string_view, ColumnNames cns, std::string_view, TableName tn1, char, TableName tn2, std::string_view, BooleanOrTerms<false> bat, std::string_view, BooleanOrTerms<true> bot) {
                 return Query(cns, TableNames{tn1, tn2}, bat, bot);
             },
         query(impl::select_kw, impl::col_name_list,
               impl::from_kw, impl::tab_name, ',', impl::tab_name,
-              impl::on_kw, impl::boolean_and_terms) >=
-            [](std::string_view, ColumnNames cns, std::string_view, TableName tn1, char, TableName tn2, std::string_view, BooleanAndTerms bat) {
-                return Query(cns, TableNames{tn1, tn2}, bat, BooleanOrTerms{});
+              impl::on_kw, impl::boolean_or_terms_two_side) >=
+            [](std::string_view, ColumnNames cns, std::string_view, TableName tn1, char, TableName tn2, std::string_view, BooleanOrTerms<false> bat) {
+                return Query(cns, TableNames{tn1, tn2}, bat, BooleanOrTerms<true>{});
             },
-        query(impl::select_kw, impl::col_name_list, impl::from_kw, impl::tab_name_list, impl::where_kw, impl::boolean_or_terms) >=
-            [](std::string_view, ColumnNames cns, std::string_view, TableNames tns, std::string_view, BooleanOrTerms bot) {
-                return Query(cns, tns, BooleanAndTerms{}, bot);
-            },
-        query(impl::select_kw, impl::col_name_list, impl::from_kw, impl::tab_name_list) >=
-            [](std::string_view, ColumnNames cns, std::string_view, TableNames tns) {
-                return Query(cns, tns, BooleanAndTerms{}, BooleanOrTerms{});
+        query(impl::select_kw, impl::col_name_list, impl::from_kw, impl::tab_name_list, impl::where_kw, impl::boolean_or_terms_one_side) >=
+            [](std::string_view, ColumnNames cns, std::string_view, TableNames tns, std::string_view, BooleanOrTerms<true> bot) {
+                return Query(cns, tns, BooleanOrTerms<false>{}, bot);
             }
+//        query_without_on_where(impl::select_kw, impl::col_name_list, impl::from_kw, impl::tab_name_list) >=
+//            [](std::string_view, ColumnNames cns, std::string_view, TableNames tns) {
+//                return Query(cns, tns, BooleanOrTerms<false>{}, BooleanOrTerms<true>{});
+//            },
+//        query_without_on(query_without_on_where, impl::where_kw, impl::boolean_or_terms_one_side) >=
+//            [](Query qry, std::string_view, BooleanOrTerms<true> bot) {
+//                qry.where_condition = bot;
+//                return qry;
+//            },
+//        query_without_where(query_without_on_where, impl::on_kw, impl::boolean_or_terms_two_side) >=
+//            [](Query qry, std::string_view, BooleanOrTerms<false> bot) {
+//                qry.join_condition = bot;
+//                return qry;
+//            },
+//        query(query_without_on, impl::on_kw, impl::boolean_or_terms_two_side) >=
+//            [](Query qry, std::string_view, BooleanOrTerms<false> bot) {
+//                qry.join_condition = bot;
+//                return qry;
+//            },
+//        query(query_without_where, impl::where_kw, impl::boolean_or_terms_one_side) >=
+//            [](Query qry, std::string_view, BooleanOrTerms<true> bot) {
+//                qry.where_condition = bot;
+//                return qry;
+//            },
+//        query(query_without_on_where) >= [](Query qry) { return qry; },
+//        query(query_without_on) >= [](Query qry) { return qry; },
+//        query(query_without_where) >= [](Query qry) { return qry; }
     );
 
     class SelectParser {
