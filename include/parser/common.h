@@ -195,8 +195,8 @@ namespace ctsql {
         return os;
     }
 
-    template<typename T, std::size_t N>
-    std::ostream& print(std::ostream& os, ctpg::stdex::cvector<T, N> vec, const std::string& sep) {
+    template<typename Vec>
+    std::ostream& print(std::ostream& os, const Vec& vec, const std::string& sep) {
         if (vec.empty()) {
             os << "*";
         } else {

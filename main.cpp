@@ -59,115 +59,82 @@ REFL_AUTO(
 //    }
 //}
 
-
-//static_assert(std::is_same_v<tuple_type<Point>, int>);
-
 using namespace ctsql;
 
 int main() {
+
     Point pt{1, 2, "lol"};
     Vec v{1, 2, 3, 4, "ha"};
 
     static constexpr char query_s[] = R"(SELECT V.name, pt.name, P.x as X, y1 as Y, SUM(y) FROM pt P, v as V
-                                         ON x=x1 AND y=V.y1 WHERE x1 > 3 AND get_mag <= 1 OR x > 88)";
+                                         ON x=x1 AND y=V.y1 OR P.name = V.name WHERE x1 > 3 AND get_mag >= 1 OR x > 88)";
 
     static constexpr auto cbuf = ctpg::buffers::cstring_buffer(query_s);
     static constexpr auto res = ctsql::SelectParser::p.parse(cbuf).value();
-
-//    ctsql::print(std::cout, res.cns, ", ") << std::endl;
-//    std::cout << res.tns << std::endl;
-//    for (const auto& bat: res.join_condition) {
+    static constexpr auto pp_res = ctsql::impl::dealias_query(res);
+    static constexpr auto resolv_res = ctsql::impl::resolve_table_name<Point, Vec>(pp_res);
+//    ctsql::print(std::cout, resolv_res.cns, ", ") << std::endl;
+//    std::cout << resolv_res.tns << std::endl;
+//    for (const auto& bat: resolv_res.join_condition) {
 //        ctsql::print(std::cout, bat, " AND ") << std::endl;
 //    }
-//    for (const auto& bat: res.where_condition) {
+//    for (const auto& bat: resolv_res.where_condition) {
 //        ctsql::print(std::cout, bat, " AND ") << std::endl;
 //    }
 //
-//    std::cout << std::endl;
-
-    static constexpr auto pp_res = ctsql::impl::dealias_query(res);
-    static constexpr auto resolv_res = ctsql::impl::resolve_table_name<Point, Vec>(pp_res);
-    ctsql::print(std::cout, resolv_res.cns, ", ") << std::endl;
-    std::cout << resolv_res.tns << std::endl;
-    for (const auto& bat: resolv_res.join_condition) {
-        ctsql::print(std::cout, bat, " AND ") << std::endl;
-    }
-    for (const auto& bat: resolv_res.where_condition) {
-        ctsql::print(std::cout, bat, " AND ") << std::endl;
-    }
-
     static constexpr auto num_terms = resolv_res.where_condition.size();
     static constexpr auto num_clauses = impl::compute_number_of_cnf_clauses(resolv_res.where_condition);
 
     static constexpr auto cnf = impl::dnf_to_cnf<num_clauses, num_terms>(resolv_res.where_condition);
-
-    for (size_t i=0; i<num_clauses; ++i) {
-        for (size_t j=0; j<num_terms; ++j) {
-            std::cout << cnf[i][j] << " ";
-        }
-        std::cout << std::endl;
-    }
-    std::cout << std::endl;
 
     static constexpr auto sifted = impl::sift(cnf);
     static constexpr size_t t0_end = std::get<0>(sifted);
     static constexpr size_t t1_end = std::get<1>(sifted);
     static constexpr auto sifted_cnf = std::get<2>(sifted);
 
-    for (size_t i=0; i<num_clauses; ++i) {
-        for (size_t j=0; j<num_terms; ++j) {
-            std::cout << sifted_cnf[i][j] << " ";
-        }
-        std::cout << std::endl;
-    }
-
     static constexpr auto sift_split = impl::split_sifted<t0_end, t1_end>(sifted_cnf);
     static constexpr auto t0 = std::get<0>(sift_split);
     static constexpr auto t1 = std::get<1>(sift_split);
     static constexpr auto mixed = std::get<2>(sift_split);
 
-    auto print_arr = [](const auto& arr) {
-        std::cout << "AND( \n";
-        for (const auto& bfs: arr) {
-            std::cout << "\tOR( ";
-            for (const auto& v: bfs) {
-                std::cout << v << " || ";
+    auto print_cnf = [](const auto& cnf) {
+        if (!cnf.empty()) {
+            std::cout << '(';
+            print(std::cout, cnf[0], " OR ") << ')';
+            for (size_t i=1; i<cnf.size(); ++i) {
+                std::cout << " AND (";
+                print(std::cout, cnf[i], " OR ") << ')';
             }
-            std::cout << ")" << std::endl;
         }
-        std::cout << ")" << std::endl;
+        std::cout << std::endl;
     };
     std::cout << "t0: \n";
-    print_arr(t0);
+    print_cnf(t0);
     std::cout << "t1: \n";
-    print_arr(t1);
+    print_cnf(t1);
     std::cout << "mixed: \n";
-    print_arr(mixed);
+    print_cnf(mixed);
 
-    static constexpr auto t0_selector = impl::make_cnf_selector<Point, void, impl::make_lhs_indices<Point, void>(t0), impl::make_cop_list(t0), impl::make_rhs_type_list(t0)>(t0);
-    static constexpr auto t1_selector = impl::make_cnf_selector<Vec, void, impl::make_lhs_indices<Vec, void>(t1), impl::make_cop_list(t1), impl::make_rhs_type_list(t1)>(t1);
+    static constexpr auto t0_inner_dim = impl::make_inner_dim<t0.size()>(num_terms);
+    static constexpr auto t0_selector = impl::make_cnf_selector<Point, void, true, impl::make_indices_2d<Point, void, true, true, t0_inner_dim>(t0), impl::make_indices_2d<Point, void, false, true, t0_inner_dim>(t0), impl::make_cop_list_2d<t0_inner_dim>(t0), impl::make_rhs_type_list_2d<t0_inner_dim>(t0), t0_inner_dim>(t0);
+    static constexpr auto t1_inner_dim = impl::make_inner_dim<t1.size()>(num_terms);
+    static constexpr auto t1_selector = impl::make_cnf_selector<Vec, void, true, impl::make_indices_2d<Vec, void, true, true, t1_inner_dim>(t1), impl::make_indices_2d<Vec, void, false, true, t1_inner_dim>(t1), impl::make_cop_list_2d<t1_inner_dim>(t1), impl::make_rhs_type_list_2d<t1_inner_dim>(t1), t1_inner_dim>(t1);
 
-    assert(!t0_selector(impl::schema_to_tuple(pt)));
+    assert(t0_selector(impl::schema_to_tuple(pt)));
     assert(t1_selector(impl::schema_to_tuple(v)));
 
-    static constexpr auto mixed_selector = impl::make_cnf_selector<Point, Vec, impl::make_lhs_indices<Point, Vec>(mixed), impl::make_cop_list(mixed), impl::make_rhs_type_list(mixed)>(mixed);
+    static constexpr auto mixed_inner_dim = impl::make_inner_dim<mixed.size()>(num_terms);
+    static constexpr auto mixed_selector = impl::make_cnf_selector<Point, Vec, true, impl::make_indices_2d<Point, Vec, true, true, mixed_inner_dim>(mixed), impl::make_indices_2d<Point, Vec, false, true, mixed_inner_dim>(mixed), impl::make_cop_list_2d<mixed_inner_dim>(mixed), impl::make_rhs_type_list_2d<mixed_inner_dim>(mixed), mixed_inner_dim>(mixed);
     assert(!mixed_selector(impl::schema_to_tuple_2(pt, v)));
 
+    static constexpr auto dnf_lens = impl::make_inner_dim<resolv_res.where_condition.size()>(resolv_res.where_condition);
+    static constexpr auto aligned_dnf = impl::align_dnf<dnf_lens>(resolv_res.where_condition);
 
+    static constexpr auto dnf_selector = impl::make_dnf_selector<Point, Vec, true, impl::make_indices_2d<Point, Vec, true, true, dnf_lens>(aligned_dnf), impl::make_indices_2d<Point, Vec, false, true, dnf_lens>(aligned_dnf), impl::make_cop_list_2d<dnf_lens>(aligned_dnf), impl::make_rhs_type_list_2d<dnf_lens>(aligned_dnf), dnf_lens>(aligned_dnf);
+    assert(!dnf_selector(impl::schema_to_tuple_2(pt, v)));
 
-//    static constexpr auto indices = impl::make_lhs_indices<Point>(cnf[1]);
-//    static constexpr auto cop_list = impl::make_cop_list(cnf[1]);
-//    static constexpr auto rhs_types = impl::make_rhs_type_list(cnf[1]);
-//
-//    const auto t = impl::schema_to_tuple(pt);
-//
-//    static constexpr auto ss = impl::make_selectors<Point, indices, cop_list, rhs_types>(cnf[1]);
-//    assert(std::get<0>(ss)(t));
-//    assert(!std::get<1>(ss)(t));
-//
-//    static constexpr auto and_cons = std::apply([](auto&&... args) { return impl::and_construct(args...); }, ss);
-//    assert(!and_cons(t));
-//
-//    static constexpr auto or_cons = std::apply([](auto&&... args) { return impl::or_construct(args...); }, ss);
-//    assert(or_cons(t));
+    static constexpr auto join_condition_lens = impl::make_inner_dim<resolv_res.join_condition.size()>(resolv_res.join_condition);
+    static constexpr auto aligned_join_dnf = impl::align_dnf<join_condition_lens>(resolv_res.join_condition);
+    static constexpr auto join_dnf_selector = impl::make_dnf_selector<Point, Vec, false, impl::make_indices_2d<Point, Vec, true, false, join_condition_lens>(aligned_join_dnf), impl::make_indices_2d<Point, Vec, false, false, join_condition_lens>(aligned_join_dnf), impl::make_cop_list_2d<join_condition_lens>(aligned_join_dnf), impl::make_rhs_type_list_2d<join_condition_lens>(aligned_join_dnf), join_condition_lens>(aligned_join_dnf);
+    assert(join_dnf_selector(impl::schema_to_tuple_2(pt, v)));
 }

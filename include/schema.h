@@ -11,7 +11,7 @@ namespace ctsql
 {
 namespace impl {
     enum class RHSTypeTag {
-        INT=0, DOUBLE, STRING
+        INT=0, DOUBLE, STRING, COLNAME
     };
 
     template<typename T>
@@ -55,109 +55,112 @@ namespace impl {
         }
     }
 
-    template<Reflectable S1, Reflectable S2, std::size_t N, typename Container>
-    constexpr auto make_lhs_indices(const Container& bfs) {
-        std::array<std::size_t, N> indices;
-        for (size_t i=0; i<N; ++i) {
-            indices[i] = get_index<S1, S2>(bfs[i].lhs);
+    template<Reflectable S1, Reflectable S2, bool is_lhs, std::size_t Cap, std::size_t Len, typename Vec>
+    constexpr auto make_indices_1d(const Vec& bfs) {
+        std::array<std::size_t, Cap> indices{};
+        for (size_t i=0; i < Len; ++i) {
+            if constexpr (is_lhs) {
+                indices[i] = get_index<S1, S2>(bfs[i].lhs);
+            } else {
+                if constexpr (std::is_same_v<BasicColumnName, decltype(bfs[i].rhs)>) {
+                    indices[i] = get_index<S1, S2>(bfs[i].rhs);
+                }
+            }
         }
         return indices;
     }
 
-    template<Reflectable S1, Reflectable S2, std::size_t N, std::size_t M, std::size_t... Idx>
-    constexpr auto make_lhs_indices_impl(const std::array<std::array<BooleanFactor<>, N>, M>& cnf, std::index_sequence<Idx...>) {
-        return refl::util::to_array<std::array<std::size_t, N>>(std::make_tuple(make_lhs_indices<S1, S2, N>(cnf[Idx])...));
+    template<Reflectable S1, Reflectable S2, bool is_lhs, bool one_side, std::array Lens, std::size_t Cap, std::size_t... Idx>
+    constexpr auto make_indices_2d_impl(const std::array<std::array<BooleanFactor<one_side>, Cap>, Lens.size()>& cnf, std::index_sequence<Idx...>) {
+        return refl::util::to_array<std::array<std::size_t, Cap>>(std::make_tuple(make_indices_1d<S1, S2, is_lhs, Cap, Lens[Idx]>(cnf[Idx])...));
     }
 
-    template<Reflectable S1, Reflectable S2, std::size_t N, std::size_t M>
-    constexpr auto make_lhs_indices(const std::array<std::array<BooleanFactor<>, N>, M>& cnf) {
-        return make_lhs_indices_impl<S1, S2>(cnf, std::make_index_sequence<M>());
+    template<Reflectable S1, Reflectable S2, bool is_lhs, bool one_side, std::array Lens, std::size_t Cap>
+    constexpr auto make_indices_2d(const std::array<std::array<BooleanFactor<one_side>, Cap>, Lens.size()>& cnf) {
+        return make_indices_2d_impl<S1, S2, is_lhs, one_side, Lens, Cap>(cnf, std::make_index_sequence<Lens.size()>());
     }
 
-    template<std::size_t N, typename Container>
-    constexpr auto make_cop_list(const Container& bfs) {
-        std::array<CompOp, N> cops;
-        for (size_t i=0; i<N; ++i) {
+    template<std::size_t Cap, std::size_t Len, typename Vec>
+    constexpr auto make_cop_list_1d(const Vec& bfs) {
+        std::array<CompOp, Cap> cops{};
+        for (size_t i=0; i<Len; ++i) {
             cops[i] = bfs[i].cop;
         }
         return cops;
     }
 
-    template<std::size_t N, std::size_t M, std::size_t... Idx>
-    constexpr auto make_cop_list_impl(const std::array<std::array<BooleanFactor<>, N>, M>& cnf, std::index_sequence<Idx...>) {
-        return refl::util::to_array<std::array<CompOp, N>>(std::make_tuple(make_cop_list<N>(cnf[Idx])...));
+    template<std::array Lens, std::size_t Cap, bool one_side, std::size_t... Idx>
+    constexpr auto make_cop_list_2d_impl(const std::array<std::array<BooleanFactor<one_side>, Cap>, Lens.size()>& cnf, std::index_sequence<Idx...>) {
+        return refl::util::to_array<std::array<CompOp, Cap>>(std::make_tuple(make_cop_list_1d<Cap, Lens[Idx]>(cnf[Idx])...));
     }
 
-    template<std::size_t N, std::size_t M>
-    constexpr auto make_cop_list(const std::array<std::array<BooleanFactor<true>, N>, M>& cnf) {
-        return make_cop_list_impl(cnf, std::make_index_sequence<M>());
+    template<std::array Lens, std::size_t Cap, bool one_side>
+    constexpr auto make_cop_list_2d(const std::array<std::array<BooleanFactor<one_side>, Cap>, Lens.size()>& cnf) {
+        return make_cop_list_2d_impl<Lens, Cap, one_side>(cnf, std::make_index_sequence<Lens.size()>());
     }
 
-    template<std::size_t N, typename Container>
-    constexpr auto make_rhs_type_list(const Container& bfs) {
-        std::array<RHSTypeTag, N> rhs_types;
-        for (size_t i=0; i<N; ++i) {
-            if (std::holds_alternative<int64_t>(bfs[i].rhs)) {
-                rhs_types[i] = RHSTypeTag::INT;
-            } else if (std::holds_alternative<double>(bfs[i].rhs)) {
-                rhs_types[i] = RHSTypeTag::DOUBLE;
+    template<std::size_t Cap, std::size_t Len, typename Vec>
+    constexpr auto make_rhs_type_list_1d(const Vec& bfs) {
+        std::array<RHSTypeTag, Cap> rhs_types{};
+        for (size_t i=0; i<Len; ++i) {
+            if constexpr (std::is_same_v<BasicColumnName, decltype(bfs[i].rhs)>) {
+                rhs_types[i] = RHSTypeTag::COLNAME;
             } else {
-                rhs_types[i] = RHSTypeTag::STRING;
+                if (std::holds_alternative<int64_t>(bfs[i].rhs)) {
+                    rhs_types[i] = RHSTypeTag::INT;
+                } else if (std::holds_alternative<double>(bfs[i].rhs)) {
+                    rhs_types[i] = RHSTypeTag::DOUBLE;
+                } else {
+                    rhs_types[i] = RHSTypeTag::STRING;
+                }
             }
         }
         return rhs_types;
     }
 
-    template<std::size_t N, std::size_t M, std::size_t... Idx>
-    constexpr auto make_rhs_type_list_impl(const std::array<std::array<BooleanFactor<>, N>, M>& cnf, std::index_sequence<Idx...>) {
-        return refl::util::to_array<std::array<RHSTypeTag, N>>(std::make_tuple(make_rhs_type_list<N>(cnf[Idx])...));
+    template<std::array Lens, std::size_t Cap, bool one_side, std::size_t... Idx>
+    constexpr auto make_rhs_type_list_2d_impl(const std::array<std::array<BooleanFactor<one_side>, Cap>, Lens.size()>& cnf, std::index_sequence<Idx...>) {
+        return refl::util::to_array<std::array<RHSTypeTag, Cap>>(std::make_tuple(make_rhs_type_list_1d<Cap, Lens[Idx]>(cnf[Idx])...));
     }
 
-    template<std::size_t N, std::size_t M>
-    constexpr auto make_rhs_type_list(const std::array<std::array<BooleanFactor<>, N>, M>& cnf) {
-        return make_rhs_type_list_impl(cnf, std::make_index_sequence<M>());
+    template<std::array Lens, std::size_t Cap, bool one_side>
+    constexpr auto make_rhs_type_list_2d(const std::array<std::array<BooleanFactor<one_side>, Cap>, Lens.size()>& cnf) {
+        return make_rhs_type_list_2d_impl<Lens, Cap, one_side>(cnf, std::make_index_sequence<Lens.size()>());
     }
 
     template<RHSTypeTag rhs_type>
     using RHS = std::conditional_t<rhs_type==RHSTypeTag::INT, int64_t, std::conditional_t<rhs_type==RHSTypeTag::DOUBLE, double, std::string_view>>;
 
-    template<Reflectable S1, Reflectable S2, size_t lhs_idx, CompOp cop, RHSTypeTag rhs_type>
-    constexpr auto make_selector(const BooleanFactor<>& bf) {
-        const auto comp_f = to_operator<cop>();
-        if constexpr (std::is_void_v<S2>) {
-            return [comp_f, &bf](const SchemaTuple<S1>& s) -> bool {
-                return comp_f(std::get<lhs_idx>(s), std::get<RHS<rhs_type>>(bf.rhs));
-            };
+    template<Reflectable S1, Reflectable S2, bool one_side, size_t lhs_idx, size_t rhs_idx, CompOp cop, RHSTypeTag rhs_type>
+    constexpr auto make_selector(const BooleanFactor<one_side>& bf) {
+        constexpr auto comp_f = to_operator<cop>();
+        if constexpr (one_side) {
+            if constexpr (std::is_void_v<S2>) {
+                return [comp_f, rhs_val = std::get<RHS<rhs_type>>(bf.rhs)](const SchemaTuple<S1>& s) -> bool {
+                    return comp_f(std::get<lhs_idx>(s), rhs_val);
+                };
+            } else {
+                return [comp_f, rhs_val = std::get<RHS<rhs_type>>(bf.rhs)](const SchemaTuple2<S1, S2>& s) -> bool {
+                    return comp_f(std::get<lhs_idx>(s), rhs_val);
+                };
+            }
         } else {
-            return [comp_f, &bf](const SchemaTuple2<S1, S2>& s) -> bool {
-                return comp_f(std::get<lhs_idx>(s), std::get<RHS<rhs_type>>(bf.rhs));
+            static_assert(not std::is_void_v<S2>);
+            return [comp_f](const SchemaTuple2<S1, S2>& s) -> bool {
+                return comp_f(std::get<lhs_idx>(s), std::get<rhs_idx>(s));
             };
         }
+
     }
 
-//    template<Reflectable Schema, std::array lhs_indices, std::array cop_list, std::array rhs_types, std::size_t N, std::size_t... Idx>
-//    constexpr auto make_selectors_impl(const std::array<BooleanFactor, N>& bfs, std::index_sequence<Idx...>) {
-//        return std::make_tuple(make_selector<Schema, lhs_indices[Idx], cop_list[Idx], rhs_types[Idx]>(bfs[Idx])...);
-//    }
-//
-//    template<Reflectable Schema, std::array lhs_indices, std::array cop_list, std::array rhs_types, std::size_t N>
-//    constexpr auto make_selectors(const std::array<BooleanFactor, N>& bfs) {
-//        return make_selectors_impl<Schema, lhs_indices, cop_list, rhs_types>(bfs, std::make_index_sequence<N>());
-//    }
-//
-//    template<Reflectable Schema, // type is std::array<std::array<size_t, N>, M>, etc
-//            std::array lhs_indices, std::array cop_list, std::array rhs_types, std::size_t N, std::size_t M, std::size_t... Idx>
-//    constexpr auto make_selectors_impl(const std::array<std::array<BooleanFactor, N>, M>& cnf, std::index_sequence<Idx...>) {
-//        return std::make_tuple(make_selectors<Schema, lhs_indices[Idx], cop_list[Idx], rhs_types[Idx]>(cnf[Idx])...);
-//    }
-//
-//    template<Reflectable Schema, std::array lhs_indices, std::array cop_list, std::array rhs_types, std::size_t N, std::size_t M>
-//    constexpr auto make_selectors(const std::array<std::array<BooleanFactor, N>, M>& cnf) {
-//        return make_selectors_impl<Schema, lhs_indices, cop_list, rhs_types>(cnf, std::make_index_sequence<M>());
-//    }
+    template<Reflectable S1, Reflectable S2, std::size_t lhs_idx, std::size_t rhs_idx, CompOp cop> requires requires { not std::is_void_v<S1> and not std::is_void_v<S2>; }
+    constexpr auto make_joining_selector(const BooleanFactor<>& bf) {
+        constexpr auto comp_f = to_operator<cop>();
+
+    }
 
     template<typename... Selectors>
-    constexpr auto and_construct(Selectors... selector);
+    [[maybe_unused]] constexpr auto and_construct(Selectors... selector);
 
     template<typename Selector, typename... Selectors>
     constexpr auto and_construct(Selector s, Selectors... selectors) {
@@ -178,7 +181,7 @@ namespace impl {
     }
 
     template<typename... Selectors>
-    constexpr auto or_construct(Selectors... selector);
+    [[maybe_unused]] constexpr auto or_construct(Selectors... selector);
 
     template<typename Selector, typename... Selectors>
     constexpr auto or_construct(Selector s, Selectors... selectors) {
@@ -198,41 +201,77 @@ namespace impl {
         return [](const auto& tuple) { return true; };
     }
 
-    // DNF selector
-    template<Reflectable Schema>
-    constexpr auto make_dnf_selector() {
-
+    template<std::size_t Len>
+    constexpr std::array<std::size_t, Len> make_inner_dim(std::size_t v) {
+        std::array<std::size_t, Len> arr;
+        for (size_t i = 0; i < Len; ++i) {
+            arr[i] = v;
+        }
+        return arr;
     }
 
-    // turning the "CNF matrix" into a boolean-valued selector
-    template<Reflectable S1, Reflectable S2, std::array lhs_indices, std::array cop_list, std::array rhs_types, std::size_t N, typename Vec, std::size_t... Idx>
+    template<std::size_t Len, bool one_side>
+    constexpr std::array<std::size_t, Len> make_inner_dim(const BooleanOrTerms<one_side>& where_conditions) {
+        std::array<std::size_t, Len> arr;
+        for (size_t i = 0; i < Len; ++i) {
+            arr[i] = where_conditions[i].size();
+        }
+        return arr;
+    }
+
+    template<std::array arr, bool one_side>
+    constexpr auto align_dnf(const BooleanOrTerms<one_side>& where_conditions) {
+        constexpr std::size_t Len = arr.size();
+        constexpr std::size_t Cap = *std::max_element(arr.begin(), arr.end());
+        std::array<std::array<BooleanFactor<one_side>, Cap>, Len> aligned{};
+        for (std::size_t i=0; i<Len; ++i) {
+            for (std::size_t j=0; j<arr[i]; ++j) {
+                aligned[i][j] = where_conditions[i][j];
+            }
+        }
+        return aligned;
+    }
+
+    template<Reflectable S1, Reflectable S2, bool one_side, std::array lhs_indices, std::array rhs_indices, std::array cop_list, std::array rhs_types, typename Vec, std::size_t... Idx>
     constexpr auto make_selector_or_cons_impl(const Vec& bfs, std::index_sequence<Idx...>) {
-        return or_construct(make_selector<S1, S2, lhs_indices[Idx], cop_list[Idx], rhs_types[Idx]>(bfs[Idx])...);
+        return or_construct(make_selector<S1, S2, one_side, lhs_indices[Idx], rhs_indices[Idx], cop_list[Idx], rhs_types[Idx]>(bfs[Idx])...);
     }
-    template<Reflectable S1, Reflectable S2, std::array lhs_indices, std::array cop_list, std::array rhs_types, std::size_t N, typename Vec>
+    template<Reflectable S1, Reflectable S2, bool one_side, std::array lhs_indices, std::array rhs_indices, std::array cop_list, std::array rhs_types, std::size_t Len, typename Vec>
     constexpr auto make_selector_or_cons(const Vec& bfs) {
-        return make_selector_or_cons_impl<S1, S2, lhs_indices, cop_list, rhs_types, N>(bfs, std::make_index_sequence<N>());
+        return make_selector_or_cons_impl<S1, S2, one_side, lhs_indices, rhs_indices, cop_list, rhs_types>(bfs, std::make_index_sequence<Len>());
     }
 
-    template<Reflectable S1, Reflectable S2, std::array lhs_indices, std::array cop_list, std::array rhs_types, std::size_t N, typename Vec, std::size_t... Idx>
+    template<Reflectable S1, Reflectable S2, bool one_side, std::array lhs_indices, std::array rhs_indices, std::array cop_list, std::array rhs_types, typename Vec, std::size_t... Idx>
     constexpr auto make_selector_and_cons_impl(const Vec& bfs, std::index_sequence<Idx...>) {
-        return and_construct(make_selector<S1, S2, lhs_indices[Idx], cop_list[Idx], rhs_types[Idx]>(bfs[Idx])...);
+        return and_construct(make_selector<S1, S2, one_side, lhs_indices[Idx], rhs_indices[Idx], cop_list[Idx], rhs_types[Idx]>(bfs[Idx])...);
     }
-    template<Reflectable S1, Reflectable S2, std::array lhs_indices, std::array cop_list, std::array rhs_types, std::size_t N, typename Vec>
+    template<Reflectable S1, Reflectable S2, bool one_side, std::array lhs_indices, std::array rhs_indices, std::array cop_list, std::array rhs_types, std::size_t Len, typename Vec>
     constexpr auto make_selector_and_cons(const Vec& bfs) {
-        return make_selector_and_cons_impl<S1, S2, lhs_indices, cop_list, rhs_types, N>(bfs, std::make_index_sequence<N>());
+        return make_selector_and_cons_impl<S1, S2, one_side, lhs_indices, rhs_indices, cop_list, rhs_types>(bfs, std::make_index_sequence<Len>());
     }
 
-    template<Reflectable S1, Reflectable S2, // type is std::array<std::array<size_t, N>, M>, etc
-            std::array lhs_indices, std::array cop_list, std::array rhs_types, std::size_t N, std::size_t M, std::size_t... Idx>
-    constexpr auto make_cnf_selector_impl(const std::array<std::array<BooleanFactor<>, N>, M>& cnf, std::index_sequence<Idx...>) {
-        return and_construct(make_selector_or_cons<S1, S2, lhs_indices[Idx], cop_list[Idx], rhs_types[Idx], N>(cnf[Idx])...);
+    template<Reflectable S1, Reflectable S2,
+            bool one_side, std::array lhs_indices, std::array rhs_indices, std::array cop_list, std::array rhs_types, std::array Lens, typename Mat, std::size_t... Idx>
+    constexpr auto make_cnf_selector_impl(const Mat& cnf, std::index_sequence<Idx...>) {
+        return and_construct(make_selector_or_cons<S1, S2, one_side, lhs_indices[Idx], rhs_indices[Idx], cop_list[Idx], rhs_types[Idx], Lens[Idx]>(cnf[Idx])...);
     }
 
-    template<Reflectable S1, Reflectable S2, // type is std::array<std::array<size_t, N>, M>, etc
-            std::array lhs_indices, std::array cop_list, std::array rhs_types, std::size_t N, std::size_t M>
-    constexpr auto make_cnf_selector(const std::array<std::array<BooleanFactor<>, N>, M>& cnf) {
-        return make_cnf_selector_impl<S1, S2, lhs_indices, cop_list, rhs_types, N, M>(cnf, std::make_index_sequence<M>());
+    template<Reflectable S1, Reflectable S2,
+            bool one_side, std::array lhs_indices, std::array rhs_indices, std::array cop_list, std::array rhs_types, std::array Lens, typename Mat>
+    constexpr auto make_cnf_selector(const Mat& cnf) {
+        return make_cnf_selector_impl<S1, S2, one_side, lhs_indices, rhs_indices, cop_list, rhs_types, Lens>(cnf, std::make_index_sequence<Lens.size()>());
+    }
+
+    template<Reflectable S1, Reflectable S2,
+            bool one_side, std::array lhs_indices, std::array rhs_indices, std::array cop_list, std::array rhs_types, std::array Lens, typename Mat, std::size_t... Idx>
+    constexpr auto make_dnf_selector_impl(const Mat& cnf, std::index_sequence<Idx...>) {
+        return or_construct(make_selector_and_cons<S1, S2, one_side, lhs_indices[Idx], rhs_indices[Idx], cop_list[Idx], rhs_types[Idx], Lens[Idx]>(cnf[Idx])...);
+    }
+
+    template<Reflectable S1, Reflectable S2,
+            bool one_side, std::array lhs_indices, std::array rhs_indices, std::array cop_list, std::array rhs_types, std::array Lens, typename Mat>
+    constexpr auto make_dnf_selector(const Mat& cnf) {
+        return make_dnf_selector_impl<S1, S2, one_side, lhs_indices, rhs_indices, cop_list, rhs_types, Lens>(cnf, std::make_index_sequence<Lens.size()>());
     }
 
     template<std::size_t M, std::size_t N>
