@@ -38,12 +38,17 @@ namespace impl {
                 [](std::string_view tn, char, std::string_view cn) { return ColumnName{tn, cn, "", AggOp::NONE}; }
     );
 
-    // additionally captures things like AVG(Student.age)
+    // additionally captures things like MAX(Student.age) or COUNT(*)
     static constexpr auto col_name_no_alias_rules = ctpg::rules(
         col_name_no_alias(col_name_no_alias_no_agg) >= [](ColumnName cname) { return cname; },
         col_name_no_alias(agg_kws, '(', col_name_no_alias_no_agg, ')') >=
             [](AggOp agg, char, ColumnName cname, char) {
                 cname.agg = agg;
+                return cname;
+            },
+        col_name_no_alias(count_kw, '(', col_name_no_alias_no_agg, ')') >=  // not adding this causes the rule below to take precedence
+            [](std::string_view, char, ColumnName cname, char) {
+                cname.agg = AggOp::COUNT;
                 return cname;
             },
         col_name_no_alias(count_kw, '(', '*', ')') >=

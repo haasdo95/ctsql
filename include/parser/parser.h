@@ -5,7 +5,6 @@
 #include <iostream>
 
 #include <cassert>
-#include "refl.hpp"
 #include "logical.h"
 #include "keywords.h"
 #include "identifiers.h"
@@ -30,6 +29,10 @@ namespace ctsql {
         query(impl::select_kw, impl::col_name_list, impl::from_kw, impl::tab_name_list, impl::where_kw, impl::boolean_or_terms_one_side) >=
             [](std::string_view, ColumnNames cns, std::string_view, TableNames tns, std::string_view, BooleanOrTerms<true> bot) {
                 return Query(cns, tns, BooleanOrTerms<false>{}, bot);
+            },
+        query(impl::select_kw, impl::col_name_list, impl::from_kw, impl::tab_name_list) >=
+            [](std::string_view, ColumnNames cns, std::string_view, TableNames tns) {
+                return Query(cns, tns, BooleanOrTerms<false>{}, BooleanOrTerms<true>{});
             }
 //        query_without_on_where(impl::select_kw, impl::col_name_list, impl::from_kw, impl::tab_name_list) >=
 //            [](std::string_view, ColumnNames cns, std::string_view, TableNames tns) {

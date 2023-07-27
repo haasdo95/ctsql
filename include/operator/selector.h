@@ -1,60 +1,13 @@
-#ifndef SQL_SCHEMA_H
-#define SQL_SCHEMA_H
+#ifndef SQL_SELECTOR_H
+#define SQL_SELECTOR_H
 
-#include "refl.hpp"
-#include "parser/common.h"
-#include <concepts>
+#include "common.h"
 #include <variant>
 #include <tuple>
 
 namespace ctsql
 {
 namespace impl {
-    enum class RHSTypeTag {
-        INT=0, DOUBLE, STRING, COLNAME
-    };
-
-    template<typename T>
-    concept Reflectable = refl::is_reflectable<T>() or std::is_void_v<T>;
-
-    // schema object => tuple with field values
-    template<Reflectable Schema>
-    constexpr auto schema_to_tuple(const Schema& schema) {
-        return refl::util::map_to_tuple(refl::reflect<Schema>().members, [&schema](auto td){
-            return td(schema);
-        });
-    }
-
-    template<Reflectable Schema> requires std::default_initializable<Schema>
-    using SchemaTuple = decltype(schema_to_tuple(Schema{}));
-
-    template<Reflectable S1, Reflectable S2>
-    constexpr auto schema_to_tuple_2(const S1& s1, const S2& s2) {
-        return std::tuple_cat(schema_to_tuple(s1), schema_to_tuple(s2));
-    }
-
-    template<Reflectable S1, Reflectable S2> requires std::default_initializable<S1> and std::default_initializable<S2>
-    using SchemaTuple2 = decltype(schema_to_tuple_2(S1{}, S2{}));
-
-    template<Reflectable Schema>
-    static constexpr auto member_list = refl::util::map_to_array<std::string_view>(refl::reflect<Schema>().members,
-                                                                                   [](auto td){return td.name.str_view();});
-
-    template<Reflectable S1, Reflectable S2>
-    constexpr std::size_t get_index(const BasicColumnName& bcn) {
-        if constexpr (std::is_void_v<S2>) {
-            const auto& ml = member_list<S1>;
-            auto pos = std::find(ml.begin(), ml.end(), bcn.column_name);
-            return std::distance(ml.begin(), pos);
-        } else {
-            if (bcn.table_name == "0") {
-                return get_index<S1, void>(bcn);
-            } else {
-                return member_list<S1>.size() + get_index<S2, void>(bcn);  // with offset
-            }
-        }
-    }
-
     template<Reflectable S1, Reflectable S2, bool is_lhs, std::size_t Cap, std::size_t Len, typename Vec>
     constexpr auto make_indices_1d(const Vec& bfs) {
         std::array<std::size_t, Cap> indices{};
@@ -62,7 +15,7 @@ namespace impl {
             if constexpr (is_lhs) {
                 indices[i] = get_index<S1, S2>(bfs[i].lhs);
             } else {
-                if constexpr (std::is_same_v<BasicColumnName, decltype(bfs[i].rhs)>) {
+                if constexpr (ColumnReference<decltype(bfs[i].rhs)>) {
                     indices[i] = get_index<S1, S2>(bfs[i].rhs);
                 }
             }
@@ -103,7 +56,7 @@ namespace impl {
     constexpr auto make_rhs_type_list_1d(const Vec& bfs) {
         std::array<RHSTypeTag, Cap> rhs_types{};
         for (size_t i=0; i<Len; ++i) {
-            if constexpr (std::is_same_v<BasicColumnName, decltype(bfs[i].rhs)>) {
+            if constexpr (ColumnReference<decltype(bfs[i].rhs)>) {
                 rhs_types[i] = RHSTypeTag::COLNAME;
             } else {
                 if (std::holds_alternative<int64_t>(bfs[i].rhs)) {
@@ -153,12 +106,6 @@ namespace impl {
 
     }
 
-    template<Reflectable S1, Reflectable S2, std::size_t lhs_idx, std::size_t rhs_idx, CompOp cop> requires requires { not std::is_void_v<S1> and not std::is_void_v<S2>; }
-    constexpr auto make_joining_selector(const BooleanFactor<>& bf) {
-        constexpr auto comp_f = to_operator<cop>();
-
-    }
-
     template<typename... Selectors>
     [[maybe_unused]] constexpr auto and_construct(Selectors... selector);
 
@@ -201,6 +148,7 @@ namespace impl {
         return [](const auto& tuple) { return true; };
     }
 
+    // compute length of nested array
     template<std::size_t Len>
     constexpr std::array<std::size_t, Len> make_inner_dim(std::size_t v) {
         std::array<std::size_t, Len> arr;
@@ -219,13 +167,14 @@ namespace impl {
         return arr;
     }
 
-    template<std::array arr, bool one_side>
+    // turning a vector of vector into a matrix, with the width of the matrix being the largest length
+    template<std::array Lens, bool one_side>
     constexpr auto align_dnf(const BooleanOrTerms<one_side>& where_conditions) {
-        constexpr std::size_t Len = arr.size();
-        constexpr std::size_t Cap = *std::max_element(arr.begin(), arr.end());
+        constexpr std::size_t Len = Lens.size();
+        constexpr std::size_t Cap = *std::max_element(Lens.begin(), Lens.end());
         std::array<std::array<BooleanFactor<one_side>, Cap>, Len> aligned{};
         for (std::size_t i=0; i<Len; ++i) {
-            for (std::size_t j=0; j<arr[i]; ++j) {
+            for (std::size_t j=0; j < Lens[i]; ++j) {
                 aligned[i][j] = where_conditions[i][j];
             }
         }
@@ -274,6 +223,7 @@ namespace impl {
         return make_dnf_selector_impl<S1, S2, one_side, lhs_indices, rhs_indices, cop_list, rhs_types, Lens>(cnf, std::make_index_sequence<Lens.size()>());
     }
 
+    // split a CNF matrix into (1) only table 1 (2) only table 2 (3) both
     template<std::size_t M, std::size_t N>
     constexpr auto sift(std::array<std::array<BooleanFactor<>, N>, M> conditions) {
         size_t sentinel = 0;
@@ -294,7 +244,7 @@ namespace impl {
         return std::make_tuple(table_0_delim, table_1_delim, conditions);
     }
 
-
+    // actually split the sifted matrix returned by sift
     template<std::size_t t0_end, std::size_t t1_end, std::size_t M, std::size_t N>
     constexpr auto split_sifted(const std::array<std::array<BooleanFactor<>, N>, M>& conditions) {
         static_assert(t0_end <= t1_end and t1_end <= M);
@@ -312,9 +262,7 @@ namespace impl {
         }
         return std::make_tuple(t0, t1, mixed);
     }
-
-
 }
 }
 
-#endif //SQL_SCHEMA_H
+#endif //SQL_SELECTOR_H

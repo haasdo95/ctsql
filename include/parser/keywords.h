@@ -32,9 +32,6 @@ namespace impl {
     static constexpr char min_pattern[] = "[mM][iI][nN]";
     static constexpr ctpg::regex_term<min_pattern> min_kw("min_kw");
 
-    static constexpr char avg_pattern[] = "[aA][vV][gG]";
-    static constexpr ctpg::regex_term<avg_pattern> avg_kw("avg_kw");
-
     static constexpr char not_pattern[] = "[nN][oO][tT]";
     static constexpr ctpg::regex_term<not_pattern> not_kw("not_kw");
 
@@ -50,14 +47,13 @@ namespace impl {
         agg_kws(count_kw) >= [](std::string_view) { return AggOp::COUNT; },
         agg_kws(sum_kw) >= [](std::string_view) { return AggOp::SUM; },
         agg_kws(max_kw) >= [](std::string_view) { return AggOp::MAX; },
-        agg_kws(min_kw) >= [](std::string_view) { return AggOp::MIN; },
-        agg_kws(avg_kw) >= [](std::string_view) { return AggOp::AVG; }
+        agg_kws(min_kw) >= [](std::string_view) { return AggOp::MIN; }
     );
 }
 
 namespace impl_exp {
     static constexpr auto kw_terms = ctpg::terms(impl::select_kw, impl::as_kw, impl::from_kw, impl::where_kw, impl::on_kw,
-                                                 impl::count_kw, impl::sum_kw, impl::max_kw, impl::min_kw, impl::avg_kw,
+                                                 impl::count_kw, impl::sum_kw, impl::max_kw, impl::min_kw,
                                                  impl::not_kw, impl::and_kw, impl::or_kw);
     static constexpr auto kw_nterms = ctpg::nterms(impl::agg_kws);
     static constexpr auto kw_rules = std::tuple_cat(impl::agg_kws_rules);

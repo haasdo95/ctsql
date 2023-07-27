@@ -2,7 +2,6 @@
 #define SQL_PREPROC_H
 
 #include "common.h"
-#include "schema.h"
 
 namespace ctsql {
 namespace impl {
@@ -74,10 +73,14 @@ namespace impl {
     constexpr auto resolve_table_name(Query query) {
         auto substitute = [&query](auto& cn) {
             if constexpr (std::is_void_v<S2>) {  // only one table
-                cn.table_name = "0";
+                if (!cn.column_name.empty()) {
+                    cn.table_name = "0";
+                }
             } else {
                 if (cn.table_name.empty()) {  // no disambiguation available
-                    cn.table_name = resolve_name<S1, S2>(cn.column_name);;
+                    if (!cn.column_name.empty()) {
+                        cn.table_name = resolve_name<S1, S2>(cn.column_name);
+                    }
                 }
             }
         };

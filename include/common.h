@@ -5,7 +5,9 @@
 #include <stdexcept>
 #include <utility>
 #include <cassert>
+#include <concepts>
 #include "ctpg.hpp"
+#include "refl.hpp"
 
 namespace ctsql {
     static constexpr std::size_t MaxNCols = 32;
@@ -15,7 +17,7 @@ namespace ctsql {
 
     enum class AggOp {
         NONE = 0,
-        COUNT, SUM, MAX, MIN, AVG
+        COUNT, SUM, MAX, MIN
     };
     constexpr std::string_view to_str(AggOp agg) {
         switch (agg) {
@@ -29,8 +31,6 @@ namespace ctsql {
                 return "MAX";
             case AggOp::MIN:
                 return "MIN";
-            case AggOp::AVG:
-                return "AVG";
         }
         throw std::runtime_error("unknown agg");
     }
@@ -250,6 +250,56 @@ namespace ctsql {
             cns{cns}, tns{tns}, join_condition{join_condition}, where_condition{where_condition} {}
     };
 
+    // for selector-making
+    template<typename T>
+    concept Reflectable = refl::is_reflectable<T>() or std::is_void_v<T>;
+    
+    template<typename T>
+    concept ColumnReference = requires(const T& cr) {
+        requires requires { cr.table_name; cr.column_name;};
+    };
+
+    enum class RHSTypeTag {
+        INT=0, DOUBLE, STRING, COLNAME
+    };
+
+    // schema object => tuple with field values
+    template<Reflectable Schema>
+    constexpr auto schema_to_tuple(const Schema& schema) {
+        return refl::util::map_to_tuple(refl::reflect<Schema>().members, [&schema](auto td){
+            return td(schema);
+        });
+    }
+
+    template<Reflectable Schema>
+    using SchemaTuple = decltype(schema_to_tuple(std::declval<Schema>()));
+
+    template<Reflectable S1, Reflectable S2>
+    constexpr auto schema_to_tuple_2(const S1& s1, const S2& s2) {
+        return std::tuple_cat(schema_to_tuple(s1), schema_to_tuple(s2));
+    }
+
+    template<Reflectable S1, Reflectable S2>
+    using SchemaTuple2 = decltype(schema_to_tuple_2(std::declval<S1>(), std::declval<S2>()));
+
+    template<Reflectable Schema>
+    static constexpr auto member_list = refl::util::map_to_array<std::string_view>(refl::reflect<Schema>().members,
+                                                                                   [](auto td){return td.name.str_view();});
+
+    template<Reflectable S1, Reflectable S2>
+    constexpr std::size_t get_index(const ColumnReference auto& bcn) {
+        if constexpr (std::is_void_v<S2>) {
+            const auto& ml = member_list<S1>;
+            auto pos = std::find(ml.begin(), ml.end(), bcn.column_name);
+            return std::distance(ml.begin(), pos);
+        } else {
+            if (bcn.table_name == "0") {
+                return get_index<S1, void>(bcn);
+            } else {
+                return member_list<S1>.size() + get_index<S2, void>(bcn);  // with offset
+            }
+        }
+    }
 }
 
 

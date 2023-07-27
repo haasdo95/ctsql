@@ -3,15 +3,17 @@ project(sql)
 
 set(CMAKE_CXX_STANDARD 20)
 
-add_executable(sql main.cpp include/parser/preproc.h)
+add_executable(sql main.cpp)
 target_sources(sql PUBLIC include dep)
 target_include_directories(sql PRIVATE include dep)
 
 # increase constexpr step limits
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    message("Using clang")
     target_compile_options(sql PRIVATE -fconstexpr-steps=114114514)
 #    target_compile_options(sql PRIVATE -fcoroutines)
 elseif (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    message("Using gcc")
     target_compile_options(sql PRIVATE -fconstexpr-ops-limit=114514114514)
 else()
     message("Unsupported Compiler")
