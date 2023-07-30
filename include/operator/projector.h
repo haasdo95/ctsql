@@ -3,7 +3,7 @@
 
 #include "common.h"
 
-namespace ctsql
+namespace ctsql::impl
 {
     static constexpr std::size_t cnt_agg_mark = static_cast<std::size_t>(-1);
 

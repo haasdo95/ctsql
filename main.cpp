@@ -15,6 +15,8 @@
 #include "operator/selector.h"
 #include "operator/projector.h"
 
+#include "planner.h"
+
 struct Point {
     Point() = default;
     Point(int x, int y, std::string name): x{x}, y{y}, name{std::move(name)} {}
@@ -64,6 +66,7 @@ using namespace ctsql;
 using namespace ctsql::impl;
 
 int main() {
+/*** testing proj
     Point p1{1, 1, "p1"}, p2{2, 2, "p2"}, p3{3, 3, "p3"};
     std::vector<Point> ps = {p1, p2, p3};
     static constexpr char query_s[] = R"(SELECT name, COUNT(*), COUNT(name), SUM(get_mag), MIN(y), MAX(y) FROM Point)";
@@ -104,6 +107,7 @@ int main() {
     std::cout << std::get<0>(base) << ", " << std::get<1>(base)
             << ", " << std::get<2>(base) << ", " << std::get<3>(base)
             << ", " << std::get<4>(base) << ", " << std::get<5>(base) << std::endl;
+***/
 
 
 /*** Testing selector
@@ -183,4 +187,8 @@ int main() {
     static constexpr auto join_dnf_selector = impl::make_dnf_selector<Point, Vec, false, impl::make_indices_2d<Point, Vec, true, false, join_condition_lens>(aligned_join_dnf), impl::make_indices_2d<Point, Vec, false, false, join_condition_lens>(aligned_join_dnf), impl::make_cop_list_2d<join_condition_lens>(aligned_join_dnf), impl::make_rhs_type_list_2d<join_condition_lens>(aligned_join_dnf), join_condition_lens>(aligned_join_dnf);
     assert(join_dnf_selector(schema_to_tuple_2(pt, v)));
 ***/
+
+    static constexpr char query_s[] = R"(SELECT V.name, pt.name, P.x as X, y1 as Y, SUM(y) FROM pt P, v as V
+                                         ON x1=x AND y<V.y1 AND P.name = V.name WHERE x1 > 3 AND get_mag >= 1 OR x > 88)";
+    QueryPlanner<refl::make_const_string(query_s), Point, Vec> qp;
 }
