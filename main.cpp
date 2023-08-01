@@ -188,7 +188,13 @@ int main() {
     assert(join_dnf_selector(schema_to_tuple_2(pt, v)));
 ***/
 
-    static constexpr char query_s[] = R"(SELECT V.name, pt.name, P.x as X, y1 as Y, SUM(y) FROM pt P, v as V
-                                         ON x1=x AND y<V.y1 AND P.name = V.name WHERE x1 > 3 AND get_mag >= 1 OR x > 88)";
-    QueryPlanner<refl::make_const_string(query_s), Point, Vec> qp;
+//    static constexpr char query_s[] = R"(SELECT V.name, pt.name, P.x as X, y1 as Y, SUM(y) FROM pt P, v as V
+//                                         ON x1=x AND y<V.y1 AND P.name = V.name WHERE x1 > 3 AND get_mag >= 1 OR x > 88)";
+    static constexpr char query_s[] = R"(SELECT name, MAX(get_mag), COUNT(y), SUM(y) FROM Point)";
+    using QP = QueryPlanner<refl::make_const_string(query_s), Point>;
+    std::vector<SchemaTuple<Point>> pvs;
+    pvs.emplace_back(schema_to_tuple(Point(1, 1, "yi")));
+    pvs.emplace_back(schema_to_tuple(Point(2, 1, "er")));
+    pvs.emplace_back(schema_to_tuple(Point(1, 3, "san")));
+    auto reduce_gen = QP::Reduce::RG::reduce(pvs);
 }

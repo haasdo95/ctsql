@@ -171,7 +171,13 @@ namespace impl {
     template<std::array Lens, bool one_side>
     constexpr auto align_dnf(const BooleanOrTerms<one_side>& where_conditions) {
         constexpr std::size_t Len = Lens.size();
-        constexpr std::size_t Cap = *std::max_element(Lens.begin(), Lens.end());
+        constexpr std::size_t Cap = [](){
+            if constexpr (Len != 0) {
+                return *std::max_element(Lens.begin(), Lens.end());
+            } else {
+                return 0;
+            }
+        }();
         std::array<std::array<BooleanFactor<one_side>, Cap>, Len> aligned{};
         for (std::size_t i=0; i<Len; ++i) {
             for (std::size_t j=0; j < Lens[i]; ++j) {

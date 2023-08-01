@@ -52,8 +52,9 @@ namespace impl {
                 }
             }
         };
-        // de-alias select-list
+        // de-alias select-list & group by keys
         std::for_each(query.cns.begin(), query.cns.end(), substitute);
+        std::for_each(query.group_by_keys.begin(), query.group_by_keys.end(), substitute);
         // de-alias condition lists
         for (auto& bat: query.join_condition) {
             for (auto& bf: bat) {
@@ -84,8 +85,9 @@ namespace impl {
                 }
             }
         };
-        // de-alias select-list
+        // de-alias select-list & group-by keys
         std::for_each(query.cns.begin(), query.cns.end(), substitute);
+        std::for_each(query.group_by_keys.begin(), query.group_by_keys.end(), substitute);
         // de-alias condition lists
         for (auto& bat: query.join_condition) {
             for (auto& bf: bat) {

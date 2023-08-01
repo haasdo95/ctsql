@@ -1,6 +1,6 @@
 #ifndef SQL_PLANNER_H
 #define SQL_PLANNER_H
-//#include <parser/parser.h>
+#include <__generator.hpp>
 #include "common.h"
 #include "parser/parser.h"
 #include "parser/preproc.h"
@@ -85,7 +85,16 @@ namespace impl {
         using S1Dict = std::unordered_map<S1HJT, std::vector<SchemaTuple<typename T::S1Type>>, hash_tuple::hash<S1HJT>>;
         using S2Dict = std::unordered_map<S2HJT, std::vector<SchemaTuple<typename T::S2Type>>, hash_tuple::hash<S2HJT>>;
 
-        static auto equi_join(std::ranges::range auto& l_input, std::ranges::range auto& r_input) {
+        // make a selector from the non-eq join conditions, if there's any
+        static constexpr auto non_eq_selector = impl::make_selector_and_cons<typename T::S1Type, typename T::S2Type, false,
+            impl::make_indices_1d<typename T::S1Type, typename T::S2Type, true, the_rest_jc.size(), the_rest_jc.size()>(the_rest_jc),
+            impl::make_indices_1d<typename T::S1Type, typename T::S2Type, false, the_rest_jc.size(), the_rest_jc.size()>(the_rest_jc),
+            impl::make_cop_list_1d<the_rest_jc.size(), the_rest_jc.size()>(the_rest_jc),
+            impl::make_rhs_type_list_1d<the_rest_jc.size(), the_rest_jc.size()>(the_rest_jc), the_rest_jc.size()>(the_rest_jc);
+
+        // materialization doesn't matter here, since we build hash tables anyway; two placeholders
+        static std::generator<SchemaTuple2<typename T::S1Type, typename T::S2Type>>
+        join(std::ranges::range auto& l_input, std::ranges::range auto& r_input, auto, auto) {
             // build index
             S1Dict s1d;
             S2Dict s2d;
@@ -101,7 +110,14 @@ namespace impl {
                 if (pos != s2d.end()) {
                     for (const auto& l_tuple: lv) {
                         for (const auto& r_tuple: pos->second) {
-                            co_yield std::tuple_cat(l_tuple, r_tuple);
+                            if constexpr (the_rest_jc.empty()) {  // no non-eq selector at all
+                                co_yield std::tuple_cat(l_tuple, r_tuple);
+                            } else {
+                                auto lr_tuple = std::tuple_cat(l_tuple, r_tuple);
+                                if (non_eq_selector(lr_tuple)) {
+                                    co_yield std::move(lr_tuple);
+                                }
+                            }
                         }
                     }
 
@@ -110,8 +126,143 @@ namespace impl {
         }
     };
 
+    // no equi-join available; just use dnf selector
     template<typename T>
-    struct EqJoin<false, T> {};
+    struct EqJoin<false, T> {
+        using S1 = typename T::S1Type;
+        using S2 = typename T::S2Type;
+        static_assert(not std::is_void_v<S1> and not std::is_void_v<S2>);
+        static constexpr auto dnf_inner_dim = impl::make_inner_dim<T::res.join_condition.size()>(T::res.join_condition);
+        static constexpr auto aligned_dnf = impl::align_dnf<dnf_inner_dim>(T::res.join_condition);
+        static constexpr std::optional dnf_selector = aligned_dnf.empty() ? std::nullopt
+                                : std::optional{impl::make_dnf_selector<S1, S2, true,
+                                      impl::make_indices_2d<S1, S2, true, true, dnf_inner_dim>(aligned_dnf),
+                                      impl::make_indices_2d<S1, S2, false, true, dnf_inner_dim>(aligned_dnf),
+                                      impl::make_cop_list_2d<dnf_inner_dim>(aligned_dnf), impl::make_rhs_type_list_2d<dnf_inner_dim>(aligned_dnf), dnf_inner_dim>(aligned_dnf)};
+        // left side is materialized
+        static std::generator<SchemaTuple2<S1, S2>> join(std::ranges::range auto& l_input, std::ranges::range auto& r_input, std::true_type, std::false_type) {
+            for (const auto& r_tuple: r_input) {
+                for (const auto& l_tuple: l_input) {
+                    if constexpr (dnf_selector) {
+                        auto lr_tuple = std::tuple_cat(l_tuple, r_tuple);
+                        if (dnf_selector.value()(lr_tuple)) {
+                            co_yield std::move(lr_tuple);
+                        }
+                    } else {
+                        co_yield std::tuple_cat(l_tuple, r_tuple);
+                    }
+                }
+            }
+        }
+
+        static std::generator<SchemaTuple2<S1, S2>> join(std::ranges::range auto& l_input, std::ranges::range auto& r_input, std::false_type, std::true_type) {
+            for (const auto& l_tuple: l_input) {
+                for (const auto& r_tuple: r_input) {
+                    if constexpr (dnf_selector) {
+                        auto lr_tuple = std::tuple_cat(l_tuple, r_tuple);
+                        if (dnf_selector.value()(lr_tuple)) {
+                            co_yield std::move(lr_tuple);
+                        }
+                    } else {
+                        co_yield std::tuple_cat(l_tuple, r_tuple);
+                    }
+                }
+            }
+        }
+
+        static std::generator<SchemaTuple2<S1, S2>> join(std::ranges::range auto& l_input, std::ranges::range auto& r_input, std::true_type, std::true_type) {
+            return join(l_input, r_input, std::true_type{}, std::false_type{});
+        }
+
+        static std::generator<SchemaTuple2<S1, S2>> join(std::ranges::range auto& l_input, std::ranges::range auto& r_input, std::false_type, std::false_type) {
+            std::vector<std::ranges::range_value_t<decltype(r_input)>> materialized_r_input;
+            for (auto&& r_tuple: r_input) {
+                materialized_r_input.emplace_back(std::forward<decltype(r_tuple)>(r_tuple));
+            }
+            return join(l_input, materialized_r_input, std::false_type{}, std::true_type{});
+        }
+
+    };
+
+    template<bool need_join, bool admits_eq_join, typename T>
+    struct Join {
+        using EqJ = EqJoin<admits_eq_join, T>;
+    };
+
+    template<bool admits_eq_join, typename T>
+    struct Join<false, admits_eq_join, T> {};
+
+    template<bool has_groups, typename T>
+    struct ReduceGroup;
+    // reduce by groups
+    template<typename T>
+    struct ReduceGroup<true, T> {
+        using S1 = typename T::S1Type;
+        using S2 = typename T::S2Type;
+        static constexpr auto projector = T::projector.value();
+
+        static_assert(T::res.group_by_keys.size() != 0);
+
+        static constexpr std::array group_by_indices = []() {
+            std::array<std::size_t, T::res.group_by_keys.size()> gb_indices;
+            for (size_t i = 0; i < gb_indices.size(); ++i) {
+                gb_indices[i] = get_index<S1, S2>(T::res.group_by_keys[i]);
+            }
+            return gb_indices;
+        }();
+
+        using STuple = typename T::STuple;
+        using PTuple = typename T::PTuple;
+        static constexpr auto gb_projector = impl::make_projector<group_by_indices>();
+        using GBTuple = ProjectedTuple<STuple, group_by_indices>;
+        using GBDict = std::unordered_map<GBTuple, PTuple, hash_tuple::hash<GBTuple>>;
+
+        static std::generator<PTuple> reduce(std::ranges::range auto& input) {
+            GBDict gb_dict;
+            auto reduce_op = impl::to_tuple_operator<T::agg_ops>();
+            for (const auto& inp_tuple: input) {
+                auto gb_tuple = gb_projector(inp_tuple);
+                auto pos = gb_dict.find(gb_tuple);
+                if (pos == gb_dict.end()) {
+                    pos = gb_dict.emplace(gb_tuple, impl::make_reduction_base<PTuple, T::agg_ops>()).first;
+                }
+                reduce_op(pos->second, projector(inp_tuple));
+            }
+            for (const auto& kv: gb_dict) {
+                co_yield kv.second;
+            }
+        }
+
+    };
+
+    // global reduce
+    template<typename T>
+    struct ReduceGroup<false, T> {
+        using PTuple = typename T::PTuple;
+        static constexpr auto projector = T::projector.value();
+
+        static_assert(T::res.group_by_keys.size() == 0);
+
+        static std::generator<PTuple> reduce(std::ranges::range auto& input) {
+            auto reduce_op = impl::to_tuple_operator<T::agg_ops>();
+            auto base = make_tuple_reduction_base<PTuple, T::agg_ops>();
+            for (const auto& inp_tuple: input) {
+                reduce_op(base, projector(inp_tuple));
+            }
+            co_yield std::move(base);
+        }
+    };
+
+    template<bool need_reduce, bool need_group_by, typename T>
+    struct Reduce;
+
+    template<bool need_group_by, typename T>
+    struct Reduce<true, need_group_by, T> {
+        using RG = ReduceGroup<need_group_by, T>;
+    };
+
+    template<bool need_group_by, typename T>
+    struct Reduce<false, need_group_by, T> {};
 }
 
 template<refl::const_string query_str, Reflectable S1, Reflectable S2=void>
@@ -196,7 +347,7 @@ struct QueryPlanner {
     }();
     static_assert(is_join_well_formed, "please only use join conditions for predicates that involve both tables");
 
-    static constexpr bool can_eq_join = res.join_condition.size() == 1 and [](){
+    static constexpr bool admits_eq_join = res.join_condition.size() == 1 and [](){
         for (const auto& bf: res.join_condition[0]) {
             if (bf.cop == CompOp::EQ) {
                 return true;
@@ -205,20 +356,20 @@ struct QueryPlanner {
         return false;
     }();
 
-    using EqJ = impl::EqJoin<can_eq_join, QueryPlanner>;
-//    static constexpr auto x = EqJ::sifted_join_conditions;
-//    using S1HJT = typename EqJ::S1HJT;
-//    using S2HJT = typename EqJ::S2HJT;
+    using Join = impl::Join<not res.join_condition.empty(), admits_eq_join, QueryPlanner>;
 
-    // joined tuple selector
-    static constexpr auto non_eq_join_conditions = [](){
-        if constexpr (can_eq_join) {
-            return BooleanOrTerms<false>{EqJ::the_rest_jc, 1};
-        } else {
-            return res.join_condition;
-        }
-    }();
+    // reduction
 
+
+    static constexpr auto proj_indices_and_agg_ops = impl::make_indices_and_agg_ops<S1, S2, res.cns.size()>(res.cns);
+    static constexpr auto proj_indices = proj_indices_and_agg_ops.first;
+    static constexpr auto agg_ops = proj_indices_and_agg_ops.second;
+    static constexpr std::optional projector = res.cns.empty() ? std::nullopt : std::optional{impl::make_projector<proj_indices>()};
+
+    using STuple = std::conditional_t<std::is_void_v<S2>, SchemaTuple<S1>, SchemaTuple2<S1, S2>>;
+    using PTuple = impl::ProjectedTuple<STuple, proj_indices>;
+
+    using Reduce = impl::Reduce<impl::need_reduction<agg_ops>, not res.group_by_keys.empty(), QueryPlanner>;
 };
 }
 

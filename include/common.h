@@ -245,9 +245,10 @@ namespace ctsql {
         TableNames tns;
         BooleanOrTerms<false> join_condition;
         BooleanOrTerms<true> where_condition;
+        ColumnNames group_by_keys;
         constexpr Query() = default;
-        constexpr Query(ColumnNames cns, TableNames tns, BooleanOrTerms<false> join_condition, BooleanOrTerms<true> where_condition):
-            cns{cns}, tns{tns}, join_condition{join_condition}, where_condition{where_condition} {}
+        constexpr Query(ColumnNames cns, TableNames tns, BooleanOrTerms<false> join_condition, BooleanOrTerms<true> where_condition, ColumnNames group_by_keys):
+            cns{cns}, tns{tns}, join_condition{join_condition}, where_condition{where_condition}, group_by_keys{group_by_keys} {}
     };
 
     // for selector-making
@@ -266,9 +267,13 @@ namespace ctsql {
     // schema object => tuple with field values
     template<Reflectable Schema>
     constexpr auto schema_to_tuple(const Schema& schema) {
-        return refl::util::map_to_tuple(refl::reflect<Schema>().members, [&schema](auto td){
-            return td(schema);
-        });
+        if constexpr (std::is_void_v<Schema>) {
+            return std::make_tuple();
+        } else {
+             return refl::util::map_to_tuple(refl::reflect<Schema>().members, [&schema](auto td){
+                return td(schema);
+            });
+        }
     }
 
     template<Reflectable Schema>
@@ -279,7 +284,7 @@ namespace ctsql {
         return std::tuple_cat(schema_to_tuple(s1), schema_to_tuple(s2));
     }
 
-    template<Reflectable S1, Reflectable S2>
+    template<Reflectable S1, Reflectable S2> requires requires {not std::is_void_v<S2>;}
     using SchemaTuple2 = decltype(schema_to_tuple_2(std::declval<S1>(), std::declval<S2>()));
 
     template<Reflectable Schema>

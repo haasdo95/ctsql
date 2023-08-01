@@ -42,6 +42,12 @@ namespace impl {
     static constexpr char or_pattern[] = "[oO][rR]";
     static constexpr ctpg::regex_term<or_pattern> or_kw("or_kw", 0);
 
+    static constexpr char group_pattern[] = "[gG][rR][oO][uU][pP]";
+    static constexpr ctpg::regex_term<group_pattern> group_kw("group_kw");
+
+    static constexpr char by_pattern[] = "[bB][yY]";
+    static constexpr ctpg::regex_term<by_pattern> by_kw{"by_kw"};
+
     static constexpr ctpg::nterm<AggOp> agg_kws{"agg_kws"};
     static constexpr auto agg_kws_rules = ctpg::rules(
         agg_kws(count_kw) >= [](std::string_view) { return AggOp::COUNT; },
@@ -54,7 +60,7 @@ namespace impl {
 namespace impl_exp {
     static constexpr auto kw_terms = ctpg::terms(impl::select_kw, impl::as_kw, impl::from_kw, impl::where_kw, impl::on_kw,
                                                  impl::count_kw, impl::sum_kw, impl::max_kw, impl::min_kw,
-                                                 impl::not_kw, impl::and_kw, impl::or_kw);
+                                                 impl::not_kw, impl::and_kw, impl::or_kw, impl::group_kw, impl::by_kw);
     static constexpr auto kw_nterms = ctpg::nterms(impl::agg_kws);
     static constexpr auto kw_rules = std::tuple_cat(impl::agg_kws_rules);
 }
