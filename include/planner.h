@@ -68,41 +68,55 @@ namespace impl {
     }
 
     template<bool is_eq_join, typename T>
-    struct EqJoin {
+    struct EqJoin;
+
+    template<typename T>
+    struct EqJoin<true, T> {
         // code that will only "exist" if the query admits equi-join
-        static constexpr auto sifted_join_conditions = impl::sift_join_condition<typename T::S1Type, typename T::S2Type>(T::res.join_condition[0]);
+
+        using S1 = typename T::S1;
+        using S2 = typename T::S2;
+        // two tuple selector from where conditions
+        static constexpr std::optional where_two_tuple_selector = [](){
+            if constexpr (T::use_push_down) { return T::mixed_selector; }
+            else { return T::dnf_where_selector; }
+        }();
+
+        static constexpr auto sifted_join_conditions = sift_join_condition<S1, S2>(T::res.join_condition[0]);
         static constexpr auto eq_jc = sifted_join_conditions.first;
         static constexpr auto the_rest_jc = sifted_join_conditions.second;
         static_assert(not eq_jc.empty());
-        static constexpr auto hj_indices = impl::make_join_indices<typename T::S1Type, typename T::S2Type, eq_jc.size()>(eq_jc);
+        static constexpr auto hj_indices = make_join_indices<S1, S2, eq_jc.size()>(eq_jc);
         static constexpr std::array t0_hj_indices = hj_indices.first;
         static constexpr std::array t1_hj_indices = hj_indices.second;
         static constexpr auto t0_hj_projector = make_projector<t0_hj_indices>();
         static constexpr auto t1_hj_projector = make_projector<t1_hj_indices>();
-        using S1HJT = ProjectedTuple<SchemaTuple<typename T::S1Type>, t0_hj_indices>;
-        using S2HJT = ProjectedTuple<SchemaTuple<typename T::S2Type>, t1_hj_indices>;
+        using S1HJT = ProjectedTuple<SchemaTuple<S1>, t0_hj_indices>;
+        using S2HJT = ProjectedTuple<SchemaTuple<S2>, t1_hj_indices>;
         static_assert(std::is_same_v<S1HJT, S2HJT>, "misaligned types on equi-join conditions; please fix types and retry");
-        using S1Dict = std::unordered_map<S1HJT, std::vector<SchemaTuple<typename T::S1Type>>, hash_tuple::hash<S1HJT>>;
-        using S2Dict = std::unordered_map<S2HJT, std::vector<SchemaTuple<typename T::S2Type>>, hash_tuple::hash<S2HJT>>;
+        using S1Dict = std::unordered_map<S1HJT, std::vector<SchemaTuple<S1>>, hash_tuple::hash<S1HJT>>;
+        using S2Dict = std::unordered_map<S2HJT, std::vector<SchemaTuple<S2>>, hash_tuple::hash<S2HJT>>;
 
         // make a selector from the non-eq join conditions, if there's any
-        static constexpr auto non_eq_selector = impl::make_selector_and_cons<typename T::S1Type, typename T::S2Type, false,
-            impl::make_indices_1d<typename T::S1Type, typename T::S2Type, true, the_rest_jc.size(), the_rest_jc.size()>(the_rest_jc),
-            impl::make_indices_1d<typename T::S1Type, typename T::S2Type, false, the_rest_jc.size(), the_rest_jc.size()>(the_rest_jc),
+        static constexpr std::optional non_eq_selector = the_rest_jc.empty() ? std::nullopt : std::optional{impl::make_selector_and_cons<S1, S2, false,
+            impl::make_indices_1d<S1, S2, true, the_rest_jc.size(), the_rest_jc.size()>(the_rest_jc),
+            impl::make_indices_1d<S1, S2, false, the_rest_jc.size(), the_rest_jc.size()>(the_rest_jc),
             impl::make_cop_list_1d<the_rest_jc.size(), the_rest_jc.size()>(the_rest_jc),
-            impl::make_rhs_type_list_1d<the_rest_jc.size(), the_rest_jc.size()>(the_rest_jc), the_rest_jc.size()>(the_rest_jc);
+            impl::make_rhs_type_list_1d<the_rest_jc.size(), the_rest_jc.size()>(the_rest_jc), the_rest_jc.size()>(the_rest_jc)};
 
         // materialization doesn't matter here, since we build hash tables anyway; two placeholders
-        static std::generator<SchemaTuple2<typename T::S1Type, typename T::S2Type>>
+        static std::generator<SchemaTuple2<S1, S2>>
         join(std::ranges::range auto& l_input, std::ranges::range auto& r_input, auto, auto) {
             // build index
             S1Dict s1d;
             S2Dict s2d;
-            for (const auto& l_tuple: l_input) {
-                s1d[t0_hj_projector(l_tuple)].emplace_back(l_tuple);
+            for (auto&& l_tuple: l_input) {
+                auto& v = s1d[t0_hj_projector(l_tuple)];
+                v.emplace_back(std::forward<decltype(l_tuple)>(l_tuple));
             }
-            for (const auto& r_tuple: r_input) {
-                s2d[t1_hj_projector(r_tuple)].emplace_back(r_tuple);
+            for (auto&& r_tuple: r_input) {
+                auto& v = s2d[t1_hj_projector(r_tuple)];
+                v.emplace_back(std::forward<decltype(r_tuple)>(r_tuple));
             }
             // do the joining
             for (const auto& [lk, lv]: s1d) {
@@ -110,13 +124,21 @@ namespace impl {
                 if (pos != s2d.end()) {
                     for (const auto& l_tuple: lv) {
                         for (const auto& r_tuple: pos->second) {
-                            if constexpr (the_rest_jc.empty()) {  // no non-eq selector at all
-                                co_yield std::tuple_cat(l_tuple, r_tuple);
-                            } else {
-                                auto lr_tuple = std::tuple_cat(l_tuple, r_tuple);
-                                if (non_eq_selector(lr_tuple)) {
+                            auto lr_tuple = std::tuple_cat(l_tuple, r_tuple);
+                            if constexpr (non_eq_selector and where_two_tuple_selector) {
+                                if (non_eq_selector.value()(lr_tuple) and where_two_tuple_selector.value()(lr_tuple)) {
                                     co_yield std::move(lr_tuple);
                                 }
+                            } else if constexpr (non_eq_selector) {
+                                if (non_eq_selector.value()(lr_tuple)) {
+                                    co_yield std::move(lr_tuple);
+                                }
+                            } else if constexpr (where_two_tuple_selector) {
+                                if (where_two_tuple_selector.value()(lr_tuple)) {
+                                    co_yield std::move(lr_tuple);
+                                }
+                            } else {
+                                co_yield std::move(lr_tuple);
                             }
                         }
                     }
@@ -129,42 +151,53 @@ namespace impl {
     // no equi-join available; just use dnf selector
     template<typename T>
     struct EqJoin<false, T> {
-        using S1 = typename T::S1Type;
-        using S2 = typename T::S2Type;
+
+        using S1 = typename T::S1;
+        using S2 = typename T::S2;
         static_assert(not std::is_void_v<S1> and not std::is_void_v<S2>);
-        static constexpr auto dnf_inner_dim = impl::make_inner_dim<T::res.join_condition.size()>(T::res.join_condition);
-        static constexpr auto aligned_dnf = impl::align_dnf<dnf_inner_dim>(T::res.join_condition);
-        static constexpr std::optional dnf_selector = aligned_dnf.empty() ? std::nullopt
-                                : std::optional{impl::make_dnf_selector<S1, S2, true,
-                                      impl::make_indices_2d<S1, S2, true, true, dnf_inner_dim>(aligned_dnf),
-                                      impl::make_indices_2d<S1, S2, false, true, dnf_inner_dim>(aligned_dnf),
-                                      impl::make_cop_list_2d<dnf_inner_dim>(aligned_dnf), impl::make_rhs_type_list_2d<dnf_inner_dim>(aligned_dnf), dnf_inner_dim>(aligned_dnf)};
+        static constexpr auto dnf_join_inner_dim = impl::make_inner_dim<T::res.join_condition.size()>(T::res.join_condition);
+        static constexpr auto aligned_join_dnf = impl::align_dnf<dnf_join_inner_dim>(T::res.join_condition);
+        static constexpr std::optional dnf_join_selector = aligned_join_dnf.empty() ? std::nullopt : std::optional{impl::make_dnf_selector<S1, S2, false,
+                              impl::make_indices_2d<S1, S2, true, false, dnf_join_inner_dim>(aligned_join_dnf),
+                              impl::make_indices_2d<S1, S2, false, false, dnf_join_inner_dim>(aligned_join_dnf),
+                              impl::make_cop_list_2d<dnf_join_inner_dim>(aligned_join_dnf), impl::make_rhs_type_list_2d<dnf_join_inner_dim>(aligned_join_dnf), dnf_join_inner_dim>(aligned_join_dnf)};
+
+        // two tuple selector from where conditions
+        static constexpr std::optional where_two_tuple_selector = [](){
+            if constexpr (T::use_push_down) { return T::mixed_selector; }
+            else { return T::dnf_where_selector; }
+        }();
+
+        static inline constexpr bool predicate(const auto& lr_tuple) {
+            if constexpr (dnf_join_selector and where_two_tuple_selector) {
+                return dnf_join_selector.value()(lr_tuple) and where_two_tuple_selector.value()(lr_tuple);
+            } else if constexpr (dnf_join_selector) {
+                return dnf_join_selector.value()(lr_tuple);
+            } else if constexpr (where_two_tuple_selector) {
+                return where_two_tuple_selector.value()(lr_tuple);
+            } else {  // no 2-tuple filter at all
+                return true;
+            }
+        }
+
         // left side is materialized
         static std::generator<SchemaTuple2<S1, S2>> join(std::ranges::range auto& l_input, std::ranges::range auto& r_input, std::true_type, std::false_type) {
-            for (const auto& r_tuple: r_input) {
+            for (const auto& r_tuple: r_input) {  // one-pass through r-input
                 for (const auto& l_tuple: l_input) {
-                    if constexpr (dnf_selector) {
-                        auto lr_tuple = std::tuple_cat(l_tuple, r_tuple);
-                        if (dnf_selector.value()(lr_tuple)) {
-                            co_yield std::move(lr_tuple);
-                        }
-                    } else {
-                        co_yield std::tuple_cat(l_tuple, r_tuple);
+                    auto lr_tuple = std::tuple_cat(l_tuple, r_tuple);
+                    if (predicate(lr_tuple)) {
+                        co_yield std::move(lr_tuple);
                     }
                 }
             }
         }
 
         static std::generator<SchemaTuple2<S1, S2>> join(std::ranges::range auto& l_input, std::ranges::range auto& r_input, std::false_type, std::true_type) {
-            for (const auto& l_tuple: l_input) {
+            for (const auto& l_tuple: l_input) {  // one-pass through l-input
                 for (const auto& r_tuple: r_input) {
-                    if constexpr (dnf_selector) {
-                        auto lr_tuple = std::tuple_cat(l_tuple, r_tuple);
-                        if (dnf_selector.value()(lr_tuple)) {
-                            co_yield std::move(lr_tuple);
-                        }
-                    } else {
-                        co_yield std::tuple_cat(l_tuple, r_tuple);
+                    auto lr_tuple = std::tuple_cat(l_tuple, r_tuple);
+                    if (predicate(lr_tuple)) {
+                        co_yield std::move(lr_tuple);
                     }
                 }
             }
@@ -185,7 +218,10 @@ namespace impl {
     };
 
     template<bool need_join, bool admits_eq_join, typename T>
-    struct Join {
+    struct Join;
+
+    template<bool admits_eq_join, typename T>
+    struct Join<true, admits_eq_join, T> {
         using EqJ = EqJoin<admits_eq_join, T>;
     };
 
@@ -197,8 +233,6 @@ namespace impl {
     // reduce by groups
     template<typename T>
     struct ReduceGroup<true, T> {
-        using S1 = typename T::S1Type;
-        using S2 = typename T::S2Type;
         static constexpr auto projector = T::projector.value();
 
         static_assert(T::res.group_by_keys.size() != 0);
@@ -206,7 +240,7 @@ namespace impl {
         static constexpr std::array group_by_indices = []() {
             std::array<std::size_t, T::res.group_by_keys.size()> gb_indices;
             for (size_t i = 0; i < gb_indices.size(); ++i) {
-                gb_indices[i] = get_index<S1, S2>(T::res.group_by_keys[i]);
+                gb_indices[i] = get_index<typename T::S1Type, typename T::S2Type>(T::res.group_by_keys[i]);
             }
             return gb_indices;
         }();
@@ -219,12 +253,13 @@ namespace impl {
 
         static std::generator<PTuple> reduce(std::ranges::range auto& input) {
             GBDict gb_dict;
-            auto reduce_op = impl::to_tuple_operator<T::agg_ops>();
-            for (const auto& inp_tuple: input) {
+            std::function<void(PTuple&, const PTuple&)> reduce_op = to_tuple_operator<T::agg_ops>();
+            for (auto&& inp_tuple: input) {
                 auto gb_tuple = gb_projector(inp_tuple);
                 auto pos = gb_dict.find(gb_tuple);
                 if (pos == gb_dict.end()) {
-                    pos = gb_dict.emplace(gb_tuple, impl::make_reduction_base<PTuple, T::agg_ops>()).first;
+                    reduce_op = to_tuple_operator<T::agg_ops>();  // reset
+                    pos = gb_dict.emplace(gb_tuple, make_tuple_reduction_base<PTuple, T::agg_ops>()).first;
                 }
                 reduce_op(pos->second, projector(inp_tuple));
             }
@@ -244,7 +279,7 @@ namespace impl {
         static_assert(T::res.group_by_keys.size() == 0);
 
         static std::generator<PTuple> reduce(std::ranges::range auto& input) {
-            auto reduce_op = impl::to_tuple_operator<T::agg_ops>();
+            auto reduce_op = to_tuple_operator<T::agg_ops>();
             auto base = make_tuple_reduction_base<PTuple, T::agg_ops>();
             for (const auto& inp_tuple: input) {
                 reduce_op(base, projector(inp_tuple));
@@ -265,16 +300,42 @@ namespace impl {
     struct Reduce<false, need_group_by, T> {};
 }
 
-template<refl::const_string query_str, Reflectable S1, Reflectable S2=void>
-struct QueryPlanner {
-    static constexpr auto cbuf = ctpg::buffers::cstring_buffer(query_str.data);
-    static constexpr auto res = impl::resolve_table_name<S1, S2>(impl::dealias_query(SelectParser::p.parse(cbuf).value()));
+template<bool one_table, typename QP>
+struct QueryPlannerImpl;
 
-    using S1Type = S1;
-    using S2Type = S2;
+template<typename QP>
+struct QueryPlannerImpl<true, QP> {
+    using S1 = typename QP::S1Type;
+    static constexpr auto res = QP::res;
+    using STuple = SchemaTuple<S1>;
 
-    // design selecting strategy
-    //  - CNF transformation
+    static constexpr std::optional dnf_where_selector = QP::dnf_where_selector;
+
+    using Join = impl::Join<false, false, QueryPlannerImpl>;
+
+    static std::generator<STuple> filter(std::ranges::range auto& input) {
+        for (const auto& inp: input) {
+            if constexpr (dnf_where_selector) {
+                if (dnf_where_selector.value()(inp)) {
+                    co_yield inp;
+                }
+            } else {
+                co_yield inp;
+            }
+        }
+    }
+
+};
+
+template<typename QP>
+struct QueryPlannerImpl<false, QP> {
+    using S1 = typename QP::S1Type;
+    using S2 = typename QP::S2Type;
+    static_assert(not std::is_void_v<S2>);
+    static constexpr auto res = QP::res;
+    using STuple = SchemaTuple2<S1, S2>;
+
+    //  - DNF -> CNF transformation
     static constexpr size_t cnf_clause_size = res.where_condition.size();
     static constexpr size_t num_cnf_clauses = impl::compute_number_of_cnf_clauses(res.where_condition);
     static constexpr auto cnf = impl::sift(impl::dnf_to_cnf<num_cnf_clauses, cnf_clause_size>(res.where_condition));
@@ -289,50 +350,26 @@ struct QueryPlanner {
     static constexpr auto t0_inner_dim = impl::make_inner_dim<t0.size()>(cnf_clause_size);
     static constexpr auto t1_inner_dim = impl::make_inner_dim<t1.size()>(cnf_clause_size);
     static constexpr auto mixed_inner_dim = impl::make_inner_dim<mixed.size()>(cnf_clause_size); // inner dim is trivial cuz CNF clauses are of uniform length
-    //  - make selectors
-    // TODO: it's very obnoxious that I need to pass stuff in this way; this has to do with the fact that function parameters cannot be a const expr
-    static constexpr std::optional t0_selector = t0.empty() ? std::nullopt
-                                                   : std::optional{impl::make_cnf_selector<S1, void, true,
-                                                         impl::make_indices_2d<S1, void, true, true, t0_inner_dim>(t0),
-                                                         impl::make_indices_2d<S1, void, false, true, t0_inner_dim>(t0),  // just a placeholder, rhs_indices not used
-                                                         impl::make_cop_list_2d<t0_inner_dim>(t0), impl::make_rhs_type_list_2d<t0_inner_dim>(t0), t0_inner_dim>(t0)};
 
-    static constexpr std::optional t1_selector = []() {
-        if constexpr (std::is_void_v<S2>) {
-            return std::nullopt;
-        } else {
-            return t1.empty() ? std::nullopt
-                              : std::optional{impl::make_cnf_selector<S2, void, true,
-                                    impl::make_indices_2d<S2, void, true, true, t1_inner_dim>(t1),
-                                    impl::make_indices_2d<S2, void, false, true, t1_inner_dim>(t1),
-                                    impl::make_cop_list_2d<t1_inner_dim>(t1), impl::make_rhs_type_list_2d<t1_inner_dim>(t1), t1_inner_dim>(t1)};
-        }
-    }();
+    static constexpr std::optional t0_selector = t0.empty() ? std::nullopt : std::optional{impl::make_cnf_selector<S1, void, true,
+                    impl::make_indices_2d<S1, void, true, true, t0_inner_dim>(t0),
+                    impl::make_indices_2d<S1, void, false, true, t0_inner_dim>(t0),  // just a placeholder, rhs_indices not used
+                    impl::make_cop_list_2d<t0_inner_dim>(t0), impl::make_rhs_type_list_2d<t0_inner_dim>(t0), t0_inner_dim>(t0)};
 
-    static constexpr std::optional mixed_selector = []() {  // the CNF clauses that CANNOT be pushed down
-        if constexpr (std::is_void_v<S2>) {
-            return std::nullopt;
-        } else {
-            return mixed.empty() ? std::nullopt
-                                 : std::optional{impl::make_cnf_selector<S1, S2, true,
-                                       impl::make_indices_2d<S1, S2, true, true, mixed_inner_dim>(mixed),
-                                       impl::make_indices_2d<S1, S2, false, true, mixed_inner_dim>(mixed),
-                                       impl::make_cop_list_2d<mixed_inner_dim>(mixed), impl::make_rhs_type_list_2d<mixed_inner_dim>(mixed), mixed_inner_dim>(mixed)};
-        }
-    }();
+    static constexpr std::optional t1_selector = t1.empty() ? std::nullopt : std::optional{impl::make_cnf_selector<S2, void, true,
+                    impl::make_indices_2d<S2, void, true, true, t1_inner_dim>(t1),
+                    impl::make_indices_2d<S2, void, false, true, t1_inner_dim>(t1),
+                    impl::make_cop_list_2d<t1_inner_dim>(t1), impl::make_rhs_type_list_2d<t1_inner_dim>(t1), t1_inner_dim>(t1)};
 
-    //  - when either (1) S2=void (2) t0 & t1 are both null, i.e. selector cannot be decoupled, simply use DNF
-    static constexpr auto dnf_inner_dim = impl::make_inner_dim<res.where_condition.size()>(res.where_condition);
-    static constexpr auto aligned_dnf = impl::align_dnf<dnf_inner_dim>(res.where_condition);
+    static constexpr std::optional mixed_selector = mixed.empty() ? std::nullopt : std::optional{impl::make_cnf_selector<S1, S2, true,
+                    impl::make_indices_2d<S1, S2, true, true, mixed_inner_dim>(mixed),
+                    impl::make_indices_2d<S1, S2, false, true, mixed_inner_dim>(mixed),
+                    impl::make_cop_list_2d<mixed_inner_dim>(mixed), impl::make_rhs_type_list_2d<mixed_inner_dim>(mixed), mixed_inner_dim>(mixed)};
 
-    static constexpr std::optional dnf_selector = aligned_dnf.empty() ? std::nullopt
-                                : std::optional{impl::make_dnf_selector<S1, S2, true,
-                                      impl::make_indices_2d<S1, S2, true, true, dnf_inner_dim>(aligned_dnf),
-                                      impl::make_indices_2d<S1, S2, false, true, dnf_inner_dim>(aligned_dnf),
-                                      impl::make_cop_list_2d<dnf_inner_dim>(aligned_dnf), impl::make_rhs_type_list_2d<dnf_inner_dim>(aligned_dnf), dnf_inner_dim>(aligned_dnf)};
+    static constexpr bool use_push_down = t0_selector or t1_selector;
 
-    // if there is only one table OR there's no hope of pushing down, just use DNF selector
-    static constexpr bool should_dnf = std::is_void_v<S2> or (!t0_selector and !t1_selector);
+    // fall back if push-down is impossible
+    static constexpr std::optional dnf_where_selector = QP::dnf_where_selector;
 
     // processing join conditions
     static constexpr bool is_join_well_formed = [](){
@@ -356,21 +393,66 @@ struct QueryPlanner {
         return false;
     }();
 
-    using Join = impl::Join<not res.join_condition.empty(), admits_eq_join, QueryPlanner>;
+    using Join = impl::Join<true, admits_eq_join, QueryPlannerImpl>;
+};
 
-    // reduction
+template<refl::const_string query_str, Reflectable S1, Reflectable S2=void>
+struct QueryPlanner {
+    static constexpr auto cbuf = ctpg::buffers::cstring_buffer(query_str.data);
+    static constexpr auto res = impl::resolve_table_name<S1, S2>(impl::dealias_query(SelectParser::p.parse(cbuf).value()));
 
+    using S1Type = S1;
+    using S2Type = S2;
+
+    static constexpr auto dnf_where_inner_dim = impl::make_inner_dim<res.where_condition.size()>(res.where_condition);
+    static constexpr auto aligned_where_dnf = impl::align_dnf<dnf_where_inner_dim>(res.where_condition);
+
+    static constexpr std::optional dnf_where_selector = aligned_where_dnf.empty() ? std::nullopt : std::optional{impl::make_dnf_selector<S1, S2, true,
+            impl::make_indices_2d<S1, S2, true, true, dnf_where_inner_dim>(aligned_where_dnf), impl::make_indices_2d<S1, S2, false, true, dnf_where_inner_dim>(aligned_where_dnf),
+            impl::make_cop_list_2d<dnf_where_inner_dim>(aligned_where_dnf), impl::make_rhs_type_list_2d<dnf_where_inner_dim>(aligned_where_dnf), dnf_where_inner_dim>(aligned_where_dnf)};
+
+    using QP = QueryPlannerImpl<std::is_void_v<S2>, QueryPlanner>;
 
     static constexpr auto proj_indices_and_agg_ops = impl::make_indices_and_agg_ops<S1, S2, res.cns.size()>(res.cns);
     static constexpr auto proj_indices = proj_indices_and_agg_ops.first;
     static constexpr auto agg_ops = proj_indices_and_agg_ops.second;
     static constexpr std::optional projector = res.cns.empty() ? std::nullopt : std::optional{impl::make_projector<proj_indices>()};
 
-    using STuple = std::conditional_t<std::is_void_v<S2>, SchemaTuple<S1>, SchemaTuple2<S1, S2>>;
+    using STuple = typename QP::STuple;
     using PTuple = impl::ProjectedTuple<STuple, proj_indices>;
 
-    using Reduce = impl::Reduce<impl::need_reduction<agg_ops>, not res.group_by_keys.empty(), QueryPlanner>;
+    static constexpr bool need_reduce = impl::need_reduction<agg_ops>;
+    using Reduce = impl::Reduce<need_reduce, not res.group_by_keys.empty(), QueryPlanner>;
+
+    using Join = QP::Join;
+
+    using ResultType = std::conditional_t<projector.has_value(), PTuple, STuple>;
 };
+
+template<typename QP> requires requires { std::is_void_v<typename QP::S2Type>; }
+std::generator<typename QP::ResultType> process(std::ranges::range auto& input) {
+    auto filtered = QP::QP::filter(input);
+    if constexpr (QP::need_reduce) {
+        auto reduced = QP::Reduce::RG::reduce(filtered);
+        for (const auto& r: reduced) {
+            co_yield r;
+        }
+    } else {  // only apply projector
+        for (const auto& f: filtered) {
+            if constexpr (QP::projector) {
+                co_yield QP::projector.value()(f);
+            } else {
+                co_yield f;
+            }
+        }
+    }
+}
+
+template<typename QP> requires requires { not std::is_void_v<typename QP::S2Type>; }
+std::generator<typename QP::ResultType> process(std::ranges::range auto& l_input, std::ranges::range auto& r_input) {
+
+}
+
 }
 
 

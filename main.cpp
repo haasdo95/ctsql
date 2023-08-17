@@ -14,6 +14,8 @@
 
 #include "operator/selector.h"
 #include "operator/projector.h"
+#include <fmt/format.h>
+#include <fmt/ranges.h>
 
 #include "planner.h"
 
@@ -188,13 +190,32 @@ int main() {
     assert(join_dnf_selector(schema_to_tuple_2(pt, v)));
 ***/
 
+    std::vector<SchemaTuple<Point>> pvs;
+    pvs.emplace_back(schema_to_tuple(Point(1, 1, "first")));
+    pvs.emplace_back(schema_to_tuple(Point(1, 1, "first")));
+    pvs.emplace_back(schema_to_tuple(Point(2, 1, "er")));
+    pvs.emplace_back(schema_to_tuple(Point(2, 2, "er")));
+    pvs.emplace_back(schema_to_tuple(Point(2, 3, "er")));
+    pvs.emplace_back(schema_to_tuple(Point(1, 3, "san")));
+
+
 //    static constexpr char query_s[] = R"(SELECT V.name, pt.name, P.x as X, y1 as Y, SUM(y) FROM pt P, v as V
 //                                         ON x1=x AND y<V.y1 AND P.name = V.name WHERE x1 > 3 AND get_mag >= 1 OR x > 88)";
-    static constexpr char query_s[] = R"(SELECT name, MAX(get_mag), COUNT(y), SUM(y) FROM Point)";
+    static constexpr char query_s[] = R"(SELECT name, MAX(get_mag), COUNT(y), SUM(y) FROM Point WHERE y>1 GROUP BY name)";
     using QP = QueryPlanner<refl::make_const_string(query_s), Point>;
-    std::vector<SchemaTuple<Point>> pvs;
-    pvs.emplace_back(schema_to_tuple(Point(1, 1, "yi")));
-    pvs.emplace_back(schema_to_tuple(Point(2, 1, "er")));
-    pvs.emplace_back(schema_to_tuple(Point(1, 3, "san")));
-    auto reduce_gen = QP::Reduce::RG::reduce(pvs);
+    auto g = process<QP>(pvs);
+    for (const auto& t: g) {
+        fmt::print("{}\n", t);
+    }
+
+//    static constexpr char query_join_1[] = R"(SELECT Point.x, Vec.x1, Point.name, Vec.name FROM Point, Vec ON Point.name=Vec.name WHERE Point.x=1 OR Vec.x1<1.1)";
+//    using QP = QueryPlanner<refl::make_const_string(query_join_1), Point, Vec>;
+//    std::vector<SchemaTuple<Vec>> vvs;
+//    vvs.emplace_back(schema_to_tuple(Vec(1, 1, 2, 2, "first")));
+//    vvs.emplace_back(schema_to_tuple(Vec(2, 3, 2, 1, "second")));
+//
+//    auto join_1_gen = QP::Join::EqJ::join(pvs, vvs, std::true_type{}, std::true_type{});
+//    for (const auto& t: join_1_gen) {
+//        fmt::print("{}\n", QP::projector.value()(t));
+//    }
 }
