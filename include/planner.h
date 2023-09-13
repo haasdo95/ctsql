@@ -73,7 +73,6 @@ namespace impl {
     template<typename T>
     struct EqJoin<true, T> {
         // code that will only "exist" if the query admits equi-join
-
         using S1 = typename T::S1;
         using S2 = typename T::S2;
         // two tuple selector from where conditions
@@ -151,7 +150,6 @@ namespace impl {
     // no equi-join available; just use dnf selector
     template<typename T>
     struct EqJoin<false, T> {
-
         using S1 = typename T::S1;
         using S2 = typename T::S2;
         static_assert(not std::is_void_v<S1> and not std::is_void_v<S2>);

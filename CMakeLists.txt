@@ -22,7 +22,7 @@ endif ()
 find_package(fmt)
 target_link_libraries(sql PRIVATE fmt::fmt)
 
-find_package(Boost 1.78.0 REQUIRED)
+find_package(Boost 1.70.0 REQUIRED)
 if(Boost_FOUND)
     target_include_directories(${PROJECT_NAME} PRIVATE ${Boost_INCLUDE_DIRS})
     target_link_libraries(${PROJECT_NAME} ${Boost_LIBRARIES})
