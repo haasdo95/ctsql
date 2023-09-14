@@ -64,24 +64,20 @@ namespace impl {
                 return seed;
             }
         };
-
     }
 
-    template<bool is_eq_join, typename T>
+    template<bool is_eq_join, typename QPI>
     struct EqJoin;
 
-    template<typename T>
-    struct EqJoin<true, T> {
+    template<typename QPI>
+    struct EqJoin<true, QPI> {
         // code that will only "exist" if the query admits equi-join
-        using S1 = typename T::S1;
-        using S2 = typename T::S2;
+        using S1 = typename QPI::S1;
+        using S2 = typename QPI::S2;
         // two tuple selector from where conditions
-        static constexpr std::optional where_two_tuple_selector = [](){
-            if constexpr (T::use_push_down) { return T::mixed_selector; }
-            else { return T::dnf_where_selector; }
-        }();
+        static constexpr std::optional where_two_tuple_selector = QPI::where_two_tuple_selector;
 
-        static constexpr auto sifted_join_conditions = sift_join_condition<S1, S2>(T::res.join_condition[0]);
+        static constexpr auto sifted_join_conditions = sift_join_condition<S1, S2>(QPI::res.join_condition[0]);
         static constexpr auto eq_jc = sifted_join_conditions.first;
         static constexpr auto the_rest_jc = sifted_join_conditions.second;
         static_assert(not eq_jc.empty());
@@ -103,69 +99,82 @@ namespace impl {
             impl::make_cop_list_1d<the_rest_jc.size(), the_rest_jc.size()>(the_rest_jc),
             impl::make_rhs_type_list_1d<the_rest_jc.size(), the_rest_jc.size()>(the_rest_jc), the_rest_jc.size()>(the_rest_jc)};
 
-        // materialization doesn't matter here, since we build hash tables anyway; two placeholders
-        static std::generator<SchemaTuple2<S1, S2>>
-        join(std::ranges::range auto& l_input, std::ranges::range auto& r_input, auto, auto) {
-            // build index
-            S1Dict s1d;
-            S2Dict s2d;
-            for (auto&& l_tuple: l_input) {
-                auto& v = s1d[t0_hj_projector(l_tuple)];
-                v.emplace_back(std::forward<decltype(l_tuple)>(l_tuple));
+        // handles the non-eq part of join & where conditions
+        static inline constexpr bool predicate(const auto& lr_tuple) {
+            if constexpr (non_eq_selector and where_two_tuple_selector) {
+                return non_eq_selector.value()(lr_tuple) and where_two_tuple_selector.value()(lr_tuple);
+            } else if constexpr (non_eq_selector) {
+                return non_eq_selector.value()(lr_tuple);
+            } else if constexpr (where_two_tuple_selector) {
+                return where_two_tuple_selector.value()(lr_tuple);
+            } else {
+                return true;
             }
-            for (auto&& r_tuple: r_input) {
-                auto& v = s2d[t1_hj_projector(r_tuple)];
-                v.emplace_back(std::forward<decltype(r_tuple)>(r_tuple));
-            }
-            // do the joining
-            for (const auto& [lk, lv]: s1d) {
-                auto pos = s2d.find(lk);
-                if (pos != s2d.end()) {
-                    for (const auto& l_tuple: lv) {
-                        for (const auto& r_tuple: pos->second) {
+        }
+
+        // we build hash table using the smaller of the two inputs
+        static std::generator<SchemaTuple2<S1, S2>> join(std::ranges::range auto& l_input, std::ranges::range auto& r_input, std::size_t l_estimated_size=0, std::size_t r_estimated_size=1) {
+            const auto l_size = get_input_size(l_input, l_estimated_size);
+            const auto r_size = get_input_size(r_input, r_estimated_size);
+            // standard hash-join; a bit repetitive but should be okay
+            if (l_size <= r_size) {  // cannot be determined at compile-time
+                S1Dict s1d;
+                for (auto&& l_tuple: l_input) {
+                    auto& v = s1d[t0_hj_projector(l_tuple)];
+                    v.emplace_back(std::forward<decltype(l_tuple)>(l_tuple));
+                }
+                for (auto&& r_tuple: r_input) {
+                    const auto& r_key = t1_hj_projector(r_tuple);
+                    auto pos = s1d.find(r_key);
+                    if (pos != s1d.end()) {
+                        for (const auto& l_tuple: pos->second) {
                             auto lr_tuple = std::tuple_cat(l_tuple, r_tuple);
-                            if constexpr (non_eq_selector and where_two_tuple_selector) {
-                                if (non_eq_selector.value()(lr_tuple) and where_two_tuple_selector.value()(lr_tuple)) {
-                                    co_yield std::move(lr_tuple);
-                                }
-                            } else if constexpr (non_eq_selector) {
-                                if (non_eq_selector.value()(lr_tuple)) {
-                                    co_yield std::move(lr_tuple);
-                                }
-                            } else if constexpr (where_two_tuple_selector) {
-                                if (where_two_tuple_selector.value()(lr_tuple)) {
-                                    co_yield std::move(lr_tuple);
-                                }
-                            } else {
+                            if (predicate(lr_tuple)) {
                                 co_yield std::move(lr_tuple);
                             }
                         }
                     }
-
                 }
+            } else {
+                S2Dict s2d;
+                for (auto&& r_tuple: r_input) {
+                    auto& v = s2d[t1_hj_projector(r_tuple)];
+                    v.emplace_back(std::forward<decltype(r_tuple)>(r_tuple));
+                }
+                for (auto&& l_tuple: l_input) {
+                    const auto& l_key = t0_hj_projector(l_tuple);
+                    auto pos = s2d.find(l_key);
+                    if (pos != s2d.end()) {
+                        for (const auto& r_tuple: pos->second) {
+                            auto lr_tuple = std::tuple_cat(l_tuple, r_tuple);
+                            if (predicate(lr_tuple)) {
+                                co_yield std::move(lr_tuple);
+                            }
+                        }
+                    }
+                }
+
             }
         }
     };
 
     // no equi-join available; just use dnf selector
-    template<typename T>
-    struct EqJoin<false, T> {
-        using S1 = typename T::S1;
-        using S2 = typename T::S2;
+    template<typename QPI>
+    struct EqJoin<false, QPI> {
+        using S1 = typename QPI::S1;
+        using S2 = typename QPI::S2;
         static_assert(not std::is_void_v<S1> and not std::is_void_v<S2>);
-        static constexpr auto dnf_join_inner_dim = impl::make_inner_dim<T::res.join_condition.size()>(T::res.join_condition);
-        static constexpr auto aligned_join_dnf = impl::align_dnf<dnf_join_inner_dim>(T::res.join_condition);
+        static constexpr auto dnf_join_inner_dim = impl::make_inner_dim<QPI::res.join_condition.size()>(QPI::res.join_condition);
+        static constexpr auto aligned_join_dnf = impl::align_dnf<dnf_join_inner_dim>(QPI::res.join_condition);
         static constexpr std::optional dnf_join_selector = aligned_join_dnf.empty() ? std::nullopt : std::optional{impl::make_dnf_selector<S1, S2, false,
                               impl::make_indices_2d<S1, S2, true, false, dnf_join_inner_dim>(aligned_join_dnf),
                               impl::make_indices_2d<S1, S2, false, false, dnf_join_inner_dim>(aligned_join_dnf),
                               impl::make_cop_list_2d<dnf_join_inner_dim>(aligned_join_dnf), impl::make_rhs_type_list_2d<dnf_join_inner_dim>(aligned_join_dnf), dnf_join_inner_dim>(aligned_join_dnf)};
 
-        // two tuple selector from where conditions
-        static constexpr std::optional where_two_tuple_selector = [](){
-            if constexpr (T::use_push_down) { return T::mixed_selector; }
-            else { return T::dnf_where_selector; }
-        }();
+        // two-tuple selector from where conditions
+        static constexpr std::optional where_two_tuple_selector = QPI::where_two_tuple_selector;
 
+        // handles join & where conditions
         static inline constexpr bool predicate(const auto& lr_tuple) {
             if constexpr (dnf_join_selector and where_two_tuple_selector) {
                 return dnf_join_selector.value()(lr_tuple) and where_two_tuple_selector.value()(lr_tuple);
@@ -178,53 +187,60 @@ namespace impl {
             }
         }
 
-        // left side is materialized
-        static std::generator<SchemaTuple2<S1, S2>> join(std::ranges::range auto& l_input, std::ranges::range auto& r_input, std::true_type, std::false_type) {
-            for (const auto& r_tuple: r_input) {  // one-pass through r-input
-                for (const auto& l_tuple: l_input) {
-                    auto lr_tuple = std::tuple_cat(l_tuple, r_tuple);
-                    if (predicate(lr_tuple)) {
-                        co_yield std::move(lr_tuple);
+        template<class Input>
+        static constexpr bool is_materialized = std::ranges::sized_range<Input> and std::ranges::common_range<Input>;
+
+        // making the assumption that if a range is sized, it can be iterated for multiple times
+        static std::generator<SchemaTuple2<S1, S2>> join(std::ranges::range auto& l_input, std::ranges::range auto& r_input, std::size_t l_estimated_size=0, std::size_t r_estimated_size=1) {
+            if constexpr (is_materialized<decltype(l_input)>) {
+                for (const auto& r_tuple: r_input) {  // one-pass through r-input
+                    for (const auto& l_tuple: l_input) {
+                        auto lr_tuple = std::tuple_cat(l_tuple, r_tuple);
+                        if (predicate(lr_tuple)) {
+                            co_yield std::move(lr_tuple);
+                        }
                     }
                 }
-            }
-        }
-
-        static std::generator<SchemaTuple2<S1, S2>> join(std::ranges::range auto& l_input, std::ranges::range auto& r_input, std::false_type, std::true_type) {
-            for (const auto& l_tuple: l_input) {  // one-pass through l-input
-                for (const auto& r_tuple: r_input) {
-                    auto lr_tuple = std::tuple_cat(l_tuple, r_tuple);
-                    if (predicate(lr_tuple)) {
-                        co_yield std::move(lr_tuple);
+            } else if constexpr (is_materialized<decltype(r_input)>) {
+                for (const auto& l_tuple: l_input) {  // one-pass through l-input
+                    for (const auto &r_tuple: r_input) {
+                        auto lr_tuple = std::tuple_cat(l_tuple, r_tuple);
+                        if (predicate(lr_tuple)) {
+                            co_yield std::move(lr_tuple);
+                        }
                     }
                 }
+            } else {  // neither is materialized; materialize the smaller one
+                const auto l_size = get_input_size(l_input, l_estimated_size);
+                const auto r_size = get_input_size(r_input, r_estimated_size);
+                if (l_size <= r_size) {
+                    std::vector<std::ranges::range_value_t<decltype(l_input)>> materialized_input;
+                    for (auto&& l_tuple: l_input) {
+                        materialized_input.emplace_back(std::forward<decltype(l_tuple)>(l_tuple));
+                    }
+                    co_yield std::ranges::elements_of(join(materialized_input, r_input, l_estimated_size, r_estimated_size));
+                } else {
+                    std::vector<std::ranges::range_value_t<decltype(r_input)>> materialized_input;
+                    for (auto&& r_tuple: r_input) {
+                        materialized_input.emplace_back(std::forward<decltype(r_tuple)>(r_tuple));
+                    }
+                    co_yield std::ranges::elements_of(join(l_input, materialized_input, l_estimated_size, r_estimated_size));
+                }
+
             }
         }
-
-        static std::generator<SchemaTuple2<S1, S2>> join(std::ranges::range auto& l_input, std::ranges::range auto& r_input, std::true_type, std::true_type) {
-            return join(l_input, r_input, std::true_type{}, std::false_type{});
-        }
-
-        static std::generator<SchemaTuple2<S1, S2>> join(std::ranges::range auto& l_input, std::ranges::range auto& r_input, std::false_type, std::false_type) {
-            std::vector<std::ranges::range_value_t<decltype(r_input)>> materialized_r_input;
-            for (auto&& r_tuple: r_input) {
-                materialized_r_input.emplace_back(std::forward<decltype(r_tuple)>(r_tuple));
-            }
-            return join(l_input, materialized_r_input, std::false_type{}, std::true_type{});
-        }
-
     };
 
-    template<bool need_join, bool admits_eq_join, typename T>
+    template<bool need_join, bool admits_eq_join, typename QPI>
     struct Join;
 
-    template<bool admits_eq_join, typename T>
-    struct Join<true, admits_eq_join, T> {
-        using EqJ = EqJoin<admits_eq_join, T>;
+    template<bool admits_eq_join, typename QPI>
+    struct Join<true, admits_eq_join, QPI> {
+        using EqJ = EqJoin<admits_eq_join, QPI>;
     };
 
-    template<bool admits_eq_join, typename T>
-    struct Join<false, admits_eq_join, T> {};
+    template<bool admits_eq_join, typename QPI>
+    struct Join<false, admits_eq_join, QPI> {};
 
     template<bool has_groups, typename T>
     struct ReduceGroup;
@@ -301,6 +317,7 @@ namespace impl {
 template<bool one_table, typename QP>
 struct QueryPlannerImpl;
 
+// query planner that only involves one table
 template<typename QP>
 struct QueryPlannerImpl<true, QP> {
     using S1 = typename QP::S1Type;
@@ -325,12 +342,13 @@ struct QueryPlannerImpl<true, QP> {
 
 };
 
+// query planner that involves two tables
 template<typename QP>
 struct QueryPlannerImpl<false, QP> {
     using S1 = typename QP::S1Type;
     using S2 = typename QP::S2Type;
     static_assert(not std::is_void_v<S2>);
-    static constexpr auto res = QP::res;
+    static constexpr auto res = QP::res;  // this is the parsed SQL statement
     using STuple = SchemaTuple2<S1, S2>;
 
     //  - DNF -> CNF transformation
@@ -348,6 +366,16 @@ struct QueryPlannerImpl<false, QP> {
     static constexpr auto t0_inner_dim = impl::make_inner_dim<t0.size()>(cnf_clause_size);
     static constexpr auto t1_inner_dim = impl::make_inner_dim<t1.size()>(cnf_clause_size);
     static constexpr auto mixed_inner_dim = impl::make_inner_dim<mixed.size()>(cnf_clause_size); // inner dim is trivial cuz CNF clauses are of uniform length
+
+    // given the raw input in the form of DNF (several AND clauses connected by OR),
+    // we compute the equivalent CNF, which is several OR clauses connected by AND.
+    // we split these OR clauses based on the tables that it makes reference to.
+    // table0 -> t0_selector; table1 -> t1_selector; mixed -> mixed_selector.
+    // note that mixed_selector is a selector on joined tuple, as it should be
+
+    // if either t0 or t1 is non-empty, we can and will use operator push-down;
+    //      after the push-down, we still need to filter the joined tuple according to the mixed-selector to ensure correctness
+    // if both t0 and t1 are empty, meaning that push-down is impossible, we abandon the CNF entirely and use the original DNF
 
     static constexpr std::optional t0_selector = t0.empty() ? std::nullopt : std::optional{impl::make_cnf_selector<S1, void, true,
                     impl::make_indices_2d<S1, void, true, true, t0_inner_dim>(t0),
@@ -369,6 +397,12 @@ struct QueryPlannerImpl<false, QP> {
     // fall back if push-down is impossible
     static constexpr std::optional dnf_where_selector = QP::dnf_where_selector;
 
+    // combining the above, the selector on joined tuples
+    static constexpr std::optional where_two_tuple_selector = [](){
+        if constexpr (use_push_down) { return mixed_selector; }
+        else { return dnf_where_selector; }
+    }();
+
     // processing join conditions
     static constexpr bool is_join_well_formed = [](){
         for (const auto& bat: res.join_condition) {
@@ -382,6 +416,7 @@ struct QueryPlannerImpl<false, QP> {
     }();
     static_assert(is_join_well_formed, "please only use join conditions for predicates that involve both tables");
 
+    // eq-join is possible if (1) no OR exists in the statement (2) one of the comparisons is equality
     static constexpr bool admits_eq_join = res.join_condition.size() == 1 and [](){
         for (const auto& bf: res.join_condition[0]) {
             if (bf.cop == CompOp::EQ) {

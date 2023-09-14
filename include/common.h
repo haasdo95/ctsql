@@ -305,6 +305,17 @@ namespace ctsql {
             }
         }
     }
+
+    // rules of determining size:
+    //  - if the input is already sized, use that; otherwise use the user provided estimated size
+    constexpr inline std::size_t get_input_size(const std::ranges::range auto& input, std::size_t estimated_size) {
+        if constexpr (std::ranges::sized_range<decltype(input)>) {
+            return std::ranges::size(input);
+        } else {
+            return estimated_size;
+        }
+    }
+
 }
 
 

@@ -64,6 +64,9 @@ REFL_AUTO(
 //    }
 //}
 
+static_assert(not std::ranges::sized_range<std::generator<int>> and std::ranges::range<std::generator<int>>);
+static_assert(not std::ranges::common_range<std::generator<int>>);
+
 using namespace ctsql;
 using namespace ctsql::impl;
 
