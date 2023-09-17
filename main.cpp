@@ -212,13 +212,13 @@ int main() {
     }
 
 //    static constexpr char query_join_1[] = R"(SELECT Point.x, Vec.x1, Point.name, Vec.name FROM Point, Vec ON Point.name=Vec.name WHERE Point.x=1 OR Vec.x1<1.1)";
-//    using QP = QueryPlanner<refl::make_const_string(query_join_1), Point, Vec>;
+//    using QPI = QueryPlanner<refl::make_const_string(query_join_1), Point, Vec>;
 //    std::vector<SchemaTuple<Vec>> vvs;
 //    vvs.emplace_back(schema_to_tuple(Vec(1, 1, 2, 2, "first")));
 //    vvs.emplace_back(schema_to_tuple(Vec(2, 3, 2, 1, "second")));
 //
-//    auto join_1_gen = QP::Join::EqJ::join(pvs, vvs, std::true_type{}, std::true_type{});
+//    auto join_1_gen = QPI::Join::EqJ::join(pvs, vvs, std::true_type{}, std::true_type{});
 //    for (const auto& t: join_1_gen) {
-//        fmt::print("{}\n", QP::projector.value()(t));
+//        fmt::print("{}\n", QPI::projector.value()(t));
 //    }
 }

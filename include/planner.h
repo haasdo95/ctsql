@@ -113,7 +113,8 @@ namespace impl {
         }
 
         // we build hash table using the smaller of the two inputs
-        static std::generator<SchemaTuple2<S1, S2>> join(std::ranges::range auto& l_input, std::ranges::range auto& r_input, std::size_t l_estimated_size=0, std::size_t r_estimated_size=1) {
+        static std::generator<SchemaTuple2<S1, S2>> join(std::ranges::range auto& l_input, std::ranges::range auto& r_input,
+                                                         std::size_t l_estimated_size, std::size_t r_estimated_size) {
             const auto l_size = get_input_size(l_input, l_estimated_size);
             const auto r_size = get_input_size(r_input, r_estimated_size);
             // standard hash-join; a bit repetitive but should be okay
@@ -130,7 +131,7 @@ namespace impl {
                         for (const auto& l_tuple: pos->second) {
                             auto lr_tuple = std::tuple_cat(l_tuple, r_tuple);
                             if (predicate(lr_tuple)) {
-                                co_yield std::move(lr_tuple);
+                                co_yield lr_tuple;
                             }
                         }
                     }
@@ -148,7 +149,7 @@ namespace impl {
                         for (const auto& r_tuple: pos->second) {
                             auto lr_tuple = std::tuple_cat(l_tuple, r_tuple);
                             if (predicate(lr_tuple)) {
-                                co_yield std::move(lr_tuple);
+                                co_yield lr_tuple;
                             }
                         }
                     }
@@ -191,13 +192,14 @@ namespace impl {
         static constexpr bool is_materialized = std::ranges::sized_range<Input> and std::ranges::common_range<Input>;
 
         // making the assumption that if a range is sized, it can be iterated for multiple times
-        static std::generator<SchemaTuple2<S1, S2>> join(std::ranges::range auto& l_input, std::ranges::range auto& r_input, std::size_t l_estimated_size=0, std::size_t r_estimated_size=1) {
+        static std::generator<SchemaTuple2<S1, S2>> join(std::ranges::range auto& l_input, std::ranges::range auto& r_input,
+                                                         std::size_t l_estimated_size, std::size_t r_estimated_size) {
             if constexpr (is_materialized<decltype(l_input)>) {
                 for (const auto& r_tuple: r_input) {  // one-pass through r-input
                     for (const auto& l_tuple: l_input) {
                         auto lr_tuple = std::tuple_cat(l_tuple, r_tuple);
                         if (predicate(lr_tuple)) {
-                            co_yield std::move(lr_tuple);
+                            co_yield lr_tuple;
                         }
                     }
                 }
@@ -206,7 +208,7 @@ namespace impl {
                     for (const auto &r_tuple: r_input) {
                         auto lr_tuple = std::tuple_cat(l_tuple, r_tuple);
                         if (predicate(lr_tuple)) {
-                            co_yield std::move(lr_tuple);
+                            co_yield lr_tuple;
                         }
                     }
                 }
@@ -242,38 +244,39 @@ namespace impl {
     template<bool admits_eq_join, typename QPI>
     struct Join<false, admits_eq_join, QPI> {};
 
-    template<bool has_groups, typename T>
+    template<bool has_groups, typename QP>
     struct ReduceGroup;
-    // reduce by groups
-    template<typename T>
-    struct ReduceGroup<true, T> {
-        static constexpr auto projector = T::projector.value();
 
-        static_assert(T::res.group_by_keys.size() != 0);
+    // reduce by groups
+    template<typename QP>
+    struct ReduceGroup<true, QP> {
+        static constexpr auto projector = QP::projector.value();
+
+        static_assert(QP::res.group_by_keys.size() != 0);
 
         static constexpr std::array group_by_indices = []() {
-            std::array<std::size_t, T::res.group_by_keys.size()> gb_indices;
+            std::array<std::size_t, QP::res.group_by_keys.size()> gb_indices;
             for (size_t i = 0; i < gb_indices.size(); ++i) {
-                gb_indices[i] = get_index<typename T::S1Type, typename T::S2Type>(T::res.group_by_keys[i]);
+                gb_indices[i] = get_index<typename QP::S1Type, typename QP::S2Type>(QP::res.group_by_keys[i]);
             }
             return gb_indices;
         }();
 
-        using STuple = typename T::STuple;
-        using PTuple = typename T::PTuple;
+        using STuple = typename QP::STuple;
+        using PTuple = typename QP::PTuple;
         static constexpr auto gb_projector = impl::make_projector<group_by_indices>();
         using GBTuple = ProjectedTuple<STuple, group_by_indices>;
         using GBDict = std::unordered_map<GBTuple, PTuple, hash_tuple::hash<GBTuple>>;
 
         static std::generator<PTuple> reduce(std::ranges::range auto& input) {
             GBDict gb_dict;
-            std::function<void(PTuple&, const PTuple&)> reduce_op = to_tuple_operator<T::agg_ops>();
+            std::function<void(PTuple&, const PTuple&)> reduce_op = to_tuple_operator<QP::agg_ops>();
             for (auto&& inp_tuple: input) {
                 auto gb_tuple = gb_projector(inp_tuple);
                 auto pos = gb_dict.find(gb_tuple);
                 if (pos == gb_dict.end()) {
-                    reduce_op = to_tuple_operator<T::agg_ops>();  // reset
-                    pos = gb_dict.emplace(gb_tuple, make_tuple_reduction_base<PTuple, T::agg_ops>()).first;
+                    reduce_op = to_tuple_operator<QP::agg_ops>();  // reset
+                    pos = gb_dict.emplace(gb_tuple, make_tuple_reduction_base<PTuple, QP::agg_ops>()).first;
                 }
                 reduce_op(pos->second, projector(inp_tuple));
             }
@@ -285,33 +288,33 @@ namespace impl {
     };
 
     // global reduce
-    template<typename T>
-    struct ReduceGroup<false, T> {
-        using PTuple = typename T::PTuple;
-        static constexpr auto projector = T::projector.value();
+    template<typename QP>
+    struct ReduceGroup<false, QP> {
+        using PTuple = typename QP::PTuple;
+        static constexpr auto projector = QP::projector.value();
 
-        static_assert(T::res.group_by_keys.size() == 0);
+        static_assert(QP::res.group_by_keys.size() == 0);
 
         static std::generator<PTuple> reduce(std::ranges::range auto& input) {
-            auto reduce_op = to_tuple_operator<T::agg_ops>();
-            auto base = make_tuple_reduction_base<PTuple, T::agg_ops>();
+            auto reduce_op = to_tuple_operator<QP::agg_ops>();
+            auto base = make_tuple_reduction_base<PTuple, QP::agg_ops>();
             for (const auto& inp_tuple: input) {
                 reduce_op(base, projector(inp_tuple));
             }
-            co_yield std::move(base);
+            co_yield base;
         }
     };
 
-    template<bool need_reduce, bool need_group_by, typename T>
+    template<bool need_reduce, bool need_group_by, typename QP>
     struct Reduce;
 
-    template<bool need_group_by, typename T>
-    struct Reduce<true, need_group_by, T> {
-        using RG = ReduceGroup<need_group_by, T>;
+    template<bool need_group_by, typename QP>
+    struct Reduce<true, need_group_by, QP> {
+        using RG = ReduceGroup<need_group_by, QP>;
     };
 
-    template<bool need_group_by, typename T>
-    struct Reduce<false, need_group_by, T> {};
+    template<bool need_group_by, typename QP>
+    struct Reduce<false, need_group_by, QP> {};
 }
 
 template<bool one_table, typename QP>
@@ -323,23 +326,7 @@ struct QueryPlannerImpl<true, QP> {
     using S1 = typename QP::S1Type;
     static constexpr auto res = QP::res;
     using STuple = SchemaTuple<S1>;
-
-    static constexpr std::optional dnf_where_selector = QP::dnf_where_selector;
-
     using Join = impl::Join<false, false, QueryPlannerImpl>;
-
-    static std::generator<STuple> filter(std::ranges::range auto& input) {
-        for (const auto& inp: input) {
-            if constexpr (dnf_where_selector) {
-                if (dnf_where_selector.value()(inp)) {
-                    co_yield inp;
-                }
-            } else {
-                co_yield inp;
-            }
-        }
-    }
-
 };
 
 // query planner that involves two tables
@@ -444,27 +431,24 @@ struct QueryPlanner {
             impl::make_indices_2d<S1, S2, true, true, dnf_where_inner_dim>(aligned_where_dnf), impl::make_indices_2d<S1, S2, false, true, dnf_where_inner_dim>(aligned_where_dnf),
             impl::make_cop_list_2d<dnf_where_inner_dim>(aligned_where_dnf), impl::make_rhs_type_list_2d<dnf_where_inner_dim>(aligned_where_dnf), dnf_where_inner_dim>(aligned_where_dnf)};
 
-    using QP = QueryPlannerImpl<std::is_void_v<S2>, QueryPlanner>;
+    using QPI = QueryPlannerImpl<std::is_void_v<S2>, QueryPlanner>;
 
     static constexpr auto proj_indices_and_agg_ops = impl::make_indices_and_agg_ops<S1, S2, res.cns.size()>(res.cns);
     static constexpr auto proj_indices = proj_indices_and_agg_ops.first;
     static constexpr auto agg_ops = proj_indices_and_agg_ops.second;
     static constexpr std::optional projector = res.cns.empty() ? std::nullopt : std::optional{impl::make_projector<proj_indices>()};
 
-    using STuple = typename QP::STuple;
+    using STuple = typename QPI::STuple;
     using PTuple = impl::ProjectedTuple<STuple, proj_indices>;
 
     static constexpr bool need_reduce = impl::need_reduction<agg_ops>;
     using Reduce = impl::Reduce<need_reduce, not res.group_by_keys.empty(), QueryPlanner>;
-
-    using Join = QP::Join;
-
     using ResultType = std::conditional_t<projector.has_value(), PTuple, STuple>;
 };
 
 template<typename QP> requires requires { std::is_void_v<typename QP::S2Type>; }
 std::generator<typename QP::ResultType> process(std::ranges::range auto& input) {
-    auto filtered = QP::QP::filter(input);
+    auto filtered = filter(input, QP::dnf_where_selector);
     if constexpr (QP::need_reduce) {
         auto reduced = QP::Reduce::RG::reduce(filtered);
         for (const auto& r: reduced) {
@@ -483,7 +467,10 @@ std::generator<typename QP::ResultType> process(std::ranges::range auto& input) 
 
 template<typename QP> requires requires { not std::is_void_v<typename QP::S2Type>; }
 std::generator<typename QP::ResultType> process(std::ranges::range auto& l_input, std::ranges::range auto& r_input) {
-
+    // if there's no chance of push-down, both are no-ops
+    auto l_filtered = filter(l_input, QP::QPI::t0_selector);
+    auto r_filtered = filter(r_input, QP::QPI::t1_selector);
+//    auto joined = QP::QPI::Join::EqJ
 }
 
 }
