@@ -318,16 +318,12 @@ namespace ctsql {
     }
 
     // generate a filtered range
-    template<typename F>
-    static auto filter(std::ranges::range auto& input, const std::optional<F>& pred) -> std::generator<std::ranges::range_value_t<decltype(input)>> {
-        if (pred) {
-            for (auto&& inp: input) {
-                if (pred.value()(inp)) {
-                    co_yield inp;
-                }
+    template<auto pred>
+    static auto filter(std::ranges::range auto& input) -> std::generator<std::ranges::range_value_t<decltype(input)>> {
+        for (auto&& inp: input) {
+            if (pred(inp)) {
+                co_yield inp;
             }
-        } else {
-            co_yield std::ranges::elements_of(input);
         }
     }
 

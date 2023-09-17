@@ -66,12 +66,12 @@ namespace impl {
         };
     }
 
-    template<bool is_eq_join, typename QPI>
-    struct EqJoin;
+    template<bool admits_eq_join, typename QPI>
+    struct Join;
 
+    // code that will only "exist" if the query admits equi-join
     template<typename QPI>
-    struct EqJoin<true, QPI> {
-        // code that will only "exist" if the query admits equi-join
+    struct Join<true, QPI> {
         using S1 = typename QPI::S1;
         using S2 = typename QPI::S2;
         // two tuple selector from where conditions
@@ -94,10 +94,10 @@ namespace impl {
 
         // make a selector from the non-eq join conditions, if there's any
         static constexpr std::optional non_eq_selector = the_rest_jc.empty() ? std::nullopt : std::optional{impl::make_selector_and_cons<S1, S2, false,
-            impl::make_indices_1d<S1, S2, true, the_rest_jc.size(), the_rest_jc.size()>(the_rest_jc),
-            impl::make_indices_1d<S1, S2, false, the_rest_jc.size(), the_rest_jc.size()>(the_rest_jc),
-            impl::make_cop_list_1d<the_rest_jc.size(), the_rest_jc.size()>(the_rest_jc),
-            impl::make_rhs_type_list_1d<the_rest_jc.size(), the_rest_jc.size()>(the_rest_jc), the_rest_jc.size()>(the_rest_jc)};
+                impl::make_indices_1d<S1, S2, true, the_rest_jc.size(), the_rest_jc.size()>(the_rest_jc),
+                impl::make_indices_1d<S1, S2, false, the_rest_jc.size(), the_rest_jc.size()>(the_rest_jc),
+                impl::make_cop_list_1d<the_rest_jc.size(), the_rest_jc.size()>(the_rest_jc),
+                impl::make_rhs_type_list_1d<the_rest_jc.size(), the_rest_jc.size()>(the_rest_jc), the_rest_jc.size()>(the_rest_jc)};
 
         // handles the non-eq part of join & where conditions
         static inline constexpr bool predicate(const auto& lr_tuple) {
@@ -122,7 +122,7 @@ namespace impl {
                 S1Dict s1d;
                 for (auto&& l_tuple: l_input) {
                     auto& v = s1d[t0_hj_projector(l_tuple)];
-                    v.emplace_back(std::forward<decltype(l_tuple)>(l_tuple));
+                    v.emplace_back(l_tuple);
                 }
                 for (auto&& r_tuple: r_input) {
                     const auto& r_key = t1_hj_projector(r_tuple);
@@ -140,7 +140,7 @@ namespace impl {
                 S2Dict s2d;
                 for (auto&& r_tuple: r_input) {
                     auto& v = s2d[t1_hj_projector(r_tuple)];
-                    v.emplace_back(std::forward<decltype(r_tuple)>(r_tuple));
+                    v.emplace_back(r_tuple);
                 }
                 for (auto&& l_tuple: l_input) {
                     const auto& l_key = t0_hj_projector(l_tuple);
@@ -161,16 +161,16 @@ namespace impl {
 
     // no equi-join available; just use dnf selector
     template<typename QPI>
-    struct EqJoin<false, QPI> {
+    struct Join<false, QPI> {
         using S1 = typename QPI::S1;
         using S2 = typename QPI::S2;
         static_assert(not std::is_void_v<S1> and not std::is_void_v<S2>);
         static constexpr auto dnf_join_inner_dim = impl::make_inner_dim<QPI::res.join_condition.size()>(QPI::res.join_condition);
         static constexpr auto aligned_join_dnf = impl::align_dnf<dnf_join_inner_dim>(QPI::res.join_condition);
         static constexpr std::optional dnf_join_selector = aligned_join_dnf.empty() ? std::nullopt : std::optional{impl::make_dnf_selector<S1, S2, false,
-                              impl::make_indices_2d<S1, S2, true, false, dnf_join_inner_dim>(aligned_join_dnf),
-                              impl::make_indices_2d<S1, S2, false, false, dnf_join_inner_dim>(aligned_join_dnf),
-                              impl::make_cop_list_2d<dnf_join_inner_dim>(aligned_join_dnf), impl::make_rhs_type_list_2d<dnf_join_inner_dim>(aligned_join_dnf), dnf_join_inner_dim>(aligned_join_dnf)};
+                impl::make_indices_2d<S1, S2, true, false, dnf_join_inner_dim>(aligned_join_dnf),
+                impl::make_indices_2d<S1, S2, false, false, dnf_join_inner_dim>(aligned_join_dnf),
+                impl::make_cop_list_2d<dnf_join_inner_dim>(aligned_join_dnf), impl::make_rhs_type_list_2d<dnf_join_inner_dim>(aligned_join_dnf), dnf_join_inner_dim>(aligned_join_dnf)};
 
         // two-tuple selector from where conditions
         static constexpr std::optional where_two_tuple_selector = QPI::where_two_tuple_selector;
@@ -218,31 +218,19 @@ namespace impl {
                 if (l_size <= r_size) {
                     std::vector<std::ranges::range_value_t<decltype(l_input)>> materialized_input;
                     for (auto&& l_tuple: l_input) {
-                        materialized_input.emplace_back(std::forward<decltype(l_tuple)>(l_tuple));
+                        materialized_input.emplace_back(l_tuple);
                     }
                     co_yield std::ranges::elements_of(join(materialized_input, r_input, l_estimated_size, r_estimated_size));
                 } else {
                     std::vector<std::ranges::range_value_t<decltype(r_input)>> materialized_input;
                     for (auto&& r_tuple: r_input) {
-                        materialized_input.emplace_back(std::forward<decltype(r_tuple)>(r_tuple));
+                        materialized_input.emplace_back(r_tuple);
                     }
                     co_yield std::ranges::elements_of(join(l_input, materialized_input, l_estimated_size, r_estimated_size));
                 }
-
             }
         }
     };
-
-    template<bool need_join, bool admits_eq_join, typename QPI>
-    struct Join;
-
-    template<bool admits_eq_join, typename QPI>
-    struct Join<true, admits_eq_join, QPI> {
-        using EqJ = EqJoin<admits_eq_join, QPI>;
-    };
-
-    template<bool admits_eq_join, typename QPI>
-    struct Join<false, admits_eq_join, QPI> {};
 
     template<bool has_groups, typename QP>
     struct ReduceGroup;
@@ -323,10 +311,7 @@ struct QueryPlannerImpl;
 // query planner that only involves one table
 template<typename QP>
 struct QueryPlannerImpl<true, QP> {
-    using S1 = typename QP::S1Type;
-    static constexpr auto res = QP::res;
-    using STuple = SchemaTuple<S1>;
-    using Join = impl::Join<false, false, QueryPlannerImpl>;
+    using STuple = SchemaTuple<typename QP::S1Type>;
 };
 
 // query planner that involves two tables
@@ -413,7 +398,7 @@ struct QueryPlannerImpl<false, QP> {
         return false;
     }();
 
-    using Join = impl::Join<true, admits_eq_join, QueryPlannerImpl>;
+    using Join = impl::Join<admits_eq_join, QueryPlannerImpl>;
 };
 
 template<refl::const_string query_str, Reflectable S1, Reflectable S2=void>
@@ -444,33 +429,55 @@ struct QueryPlanner {
     static constexpr bool need_reduce = impl::need_reduction<agg_ops>;
     using Reduce = impl::Reduce<need_reduce, not res.group_by_keys.empty(), QueryPlanner>;
     using ResultType = std::conditional_t<projector.has_value(), PTuple, STuple>;
+
+    static std::generator<ResultType> reduce_project(std::ranges::range auto& input) {
+        if constexpr (need_reduce) {
+            auto reduced = Reduce::RG::reduce(input);
+            co_yield std::ranges::elements_of(reduced);
+        } else {  // only apply projector
+            if constexpr (projector) {
+                for (auto&& t: input) {
+                    co_yield projector.value()(t);
+                }
+            } else {
+                co_yield std::ranges::elements_of(input);
+            }
+        }
+    }
+
 };
 
 template<typename QP> requires requires { std::is_void_v<typename QP::S2Type>; }
 std::generator<typename QP::ResultType> process(std::ranges::range auto& input) {
-    auto filtered = filter(input, QP::dnf_where_selector);
-    if constexpr (QP::need_reduce) {
-        auto reduced = QP::Reduce::RG::reduce(filtered);
-        for (const auto& r: reduced) {
-            co_yield r;
-        }
-    } else {  // only apply projector
-        for (const auto& f: filtered) {
-            if constexpr (QP::projector) {
-                co_yield QP::projector.value()(f);
-            } else {
-                co_yield f;
-            }
-        }
+    if constexpr (QP::dnf_where_selector) {
+        auto filtered = filter<QP::dnf_where_selector.value()>(input);
+        co_yield std::ranges::elements_of(QP::reduce_project(filtered));
+    } else {
+        co_yield std::ranges::elements_of(QP::reduce_project(input));
     }
 }
 
 template<typename QP> requires requires { not std::is_void_v<typename QP::S2Type>; }
-std::generator<typename QP::ResultType> process(std::ranges::range auto& l_input, std::ranges::range auto& r_input) {
-    // if there's no chance of push-down, both are no-ops
-    auto l_filtered = filter(l_input, QP::QPI::t0_selector);
-    auto r_filtered = filter(r_input, QP::QPI::t1_selector);
-//    auto joined = QP::QPI::Join::EqJ
+std::generator<typename QP::ResultType> process(std::ranges::range auto& l_input, std::ranges::range auto& r_input,
+                                                std::size_t l_estimated_size=0, std::size_t r_estimated_size=1) {
+    // this is clumsy, but it preserves the materialized-ness of the input
+    if constexpr (QP::QPI::t0_selector and QP::QPI::t1_selector) {
+        auto l_filtered = filter<QP::QPI::t0_selector.value()>(l_input);
+        auto r_filtered = filter<QP::QPI::t1_selector.value()>(r_input);
+        auto joined = QP::QPI::Join::join(l_filtered, r_filtered, l_estimated_size, r_estimated_size);
+        co_yield std::ranges::elements_of(QP::reduce_project(joined));
+    } else if constexpr (QP::QPI::t0_selector) {
+        auto l_filtered = filter<QP::QPI::t0_selector.value()>(l_input);
+        auto joined = QP::QPI::Join::join(l_filtered, r_input, l_estimated_size, r_estimated_size);
+        co_yield std::ranges::elements_of(QP::reduce_project(joined));
+    } else if constexpr (QP::QPI::t1_selector) {
+        auto r_filtered = filter<QP::QPI::t1_selector.value()>(r_input);
+        auto joined = QP::QPI::Join::join(l_input, r_filtered, l_estimated_size, r_estimated_size);
+        co_yield std::ranges::elements_of(QP::reduce_project(joined));
+    } else {  // we do not use push-down at all
+        auto joined = QP::QPI::Join::join(l_input, r_input, l_estimated_size, r_estimated_size);
+        co_yield std::ranges::elements_of(QP::reduce_project(joined));
+    }
 }
 
 }
